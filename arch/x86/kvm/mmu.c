@@ -1450,9 +1450,49 @@ static void handle_mmu_active_root_page(struct kvm *kvm, u64 *sptep,
 
 }
 
+static void add_roots_to_mask(struct kvm *kvm,
+			      struct kvm_mmu_page *page,
+			      unsigned long data)
+{
+	struct vcpumask *vcpus = (struct vcpumask *)data;
+
+	kvm_vcpumask_or(vcpus, page->roots, vcpus);
+}
+
+static int vcpus_need_tlb_flush(struct kvm *kvm, unsigned long *rmapp,
+				struct kvm_memory_slot *slot,
+				gfn_t gfn,
+				int level,
+				unsigned long data)
+{
+	u64 *sptep;
+	struct vcpumask *vcpus = (struct vcpumask *)data;
+	struct rmap_iterator iter;
+
+	for (sptep = rmap_get_first(*rmapp, &iter); sptep;) {
+		BUG_ON(!is_shadow_present_pte(*sptep));
+		handle_mmu_active_root_page(kvm, sptep, add_roots_to_mask,
+					  (unsigned long)vcpus);
+		sptep = rmap_get_next(&iter);
+	}
+	return 0;
+}
+
+static bool kvm_mmu_find_vcpus_need_tlb_flush(struct kvm *kvm,
+					      unsigned long hva,
+					      struct vcpumask *vcpus)
+{
+	return kvm_handle_hva(kvm, hva, (unsigned long)vcpus,
+			vcpus_need_tlb_flush);
+}
+
 bool kvm_arch_invalidate_remote_page(struct kvm *kvm, unsigned long address)
 {
-	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
+	struct vcpumask vcpus;
+
+	kvm_mmu_find_vcpus_need_tlb_flush(kvm, address, &vcpus);
+
+	return kvm_make_mask_vcpus_request(kvm, &vcpus, KVM_REQ_TLB_FLUSH);
 }
 
 int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end)
