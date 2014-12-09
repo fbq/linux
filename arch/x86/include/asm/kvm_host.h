@@ -219,6 +219,7 @@ struct kvm_mmu_page {
 	/* hold the gfn of each spte inside spt */
 	gfn_t *gfns;
 	bool unsync;
+	struct vcpumask *roots;
 	int root_count;          /* Currently serving as active root */
 	unsigned int unsync_children;
 	unsigned long parent_ptes;	/* Reverse mapping for parent_pte */

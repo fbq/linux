@@ -1596,6 +1596,7 @@ static struct kvm_mmu_page *kvm_mmu_alloc_page(struct kvm_vcpu *vcpu,
 	 */
 	list_add(&sp->link, &vcpu->kvm->arch.active_mmu_pages);
 	sp->parent_ptes = 0;
+	sp->roots = NULL;
 	mmu_page_add_parent_pte(vcpu, sp, parent_pte);
 	kvm_mod_used_mmu_pages(vcpu->kvm, +1);
 	return sp;
@@ -2972,6 +2973,24 @@ out_unlock:
 	return 0;
 }
 
+static inline void mmu_root_page_clear_all_roots(struct kvm_mmu_page *sp)
+{
+	kvm_vcpumask_zero(sp->roots);
+}
+
+static inline void mmu_root_page_set_root(struct kvm_mmu_page *sp,
+					  struct kvm_vcpu *vcpu)
+{
+	if (!sp->roots)
+		sp->roots = kvm_vcpumask_alloc();
+	kvm_vcpumask_set(vcpu, sp->roots);
+}
+
+static inline void mmu_root_page_clear_root(struct kvm_mmu_page *sp,
+					    struct kvm_vcpu *vcpu)
+{
+	kvm_vcpumask_clear(vcpu, sp->roots);
+}
 
 static void mmu_free_roots(struct kvm_vcpu *vcpu)
 {
@@ -2990,7 +3009,10 @@ static void mmu_free_roots(struct kvm_vcpu *vcpu)
 		spin_lock(&vcpu->kvm->mmu_lock);
 		sp = page_header(root);
 		--sp->root_count;
+		mmu_root_page_clear_root(sp, vcpu);
 		if (!sp->root_count && sp->role.invalid) {
+			kvm_vcpumask_free(sp->roots);
+			sp->roots = NULL;
 			kvm_mmu_prepare_zap_page(vcpu->kvm, sp, &invalid_list);
 			kvm_mmu_commit_zap_page(vcpu->kvm, &invalid_list);
 		}
@@ -3007,9 +3029,13 @@ static void mmu_free_roots(struct kvm_vcpu *vcpu)
 			root &= PT64_BASE_ADDR_MASK;
 			sp = page_header(root);
 			--sp->root_count;
-			if (!sp->root_count && sp->role.invalid)
+			mmu_root_page_clear_root(sp, vcpu);
+			if (!sp->root_count && sp->role.invalid) {
+				kvm_vcpumask_free(sp->roots);
+				sp->roots = NULL;
 				kvm_mmu_prepare_zap_page(vcpu->kvm, sp,
 							 &invalid_list);
+			}
 		}
 		vcpu->arch.mmu.pae_root[i] = INVALID_PAGE;
 	}
@@ -3041,6 +3067,7 @@ static int mmu_alloc_direct_roots(struct kvm_vcpu *vcpu)
 		sp = kvm_mmu_get_page(vcpu, 0, 0, PT64_ROOT_LEVEL,
 				      1, ACC_ALL, NULL);
 		++sp->root_count;
+		mmu_root_page_set_root(sp, vcpu);
 		spin_unlock(&vcpu->kvm->mmu_lock);
 		vcpu->arch.mmu.root_hpa = __pa(sp->spt);
 	} else if (vcpu->arch.mmu.shadow_root_level == PT32E_ROOT_LEVEL) {
@@ -3056,6 +3083,7 @@ static int mmu_alloc_direct_roots(struct kvm_vcpu *vcpu)
 					      NULL);
 			root = __pa(sp->spt);
 			++sp->root_count;
+			mmu_root_page_set_root(sp, vcpu);
 			spin_unlock(&vcpu->kvm->mmu_lock);
 			vcpu->arch.mmu.pae_root[i] = root | PT_PRESENT_MASK;
 		}
@@ -3093,6 +3121,7 @@ static int mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu)
 				      0, ACC_ALL, NULL);
 		root = __pa(sp->spt);
 		++sp->root_count;
+		mmu_root_page_set_root(sp, vcpu);
 		spin_unlock(&vcpu->kvm->mmu_lock);
 		vcpu->arch.mmu.root_hpa = root;
 		return 0;
@@ -3128,6 +3157,7 @@ static int mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu)
 				      ACC_ALL, NULL);
 		root = __pa(sp->spt);
 		++sp->root_count;
+		mmu_root_page_set_root(sp, vcpu);
 		spin_unlock(&vcpu->kvm->mmu_lock);
 
 		vcpu->arch.mmu.pae_root[i] = root | pm_mask;
