@@ -65,6 +65,12 @@ static inline void kvm_arch_mmu_notifier_invalidate_page(struct kvm *kvm,
 {
 }
 
+static inline bool kvm_arch_invalidate_remote_page(struct kvm *kvm,
+						   unsigned long address)
+{
+	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
+}
+
 #define HPTEG_CACHE_NUM			(1 << 15)
 #define HPTEG_HASH_BITS_PTE		13
 #define HPTEG_HASH_BITS_PTE_LONG	12

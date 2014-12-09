@@ -523,6 +523,8 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
 				enum kvm_mr_change change);
 bool kvm_largepages_enabled(void);
 void kvm_disable_largepages(void);
+/* invalidate one remote page */
+bool kvm_arch_invalidate_remote_page(struct kvm *kvm, unsigned long address);
 /* flush all memory translations */
 void kvm_arch_flush_shadow_all(struct kvm *kvm);
 /* flush memory translations pointing to 'slot' */

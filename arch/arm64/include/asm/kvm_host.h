@@ -196,6 +196,12 @@ static inline void kvm_arch_mmu_notifier_invalidate_page(struct kvm *kvm,
 {
 }
 
+static inline bool kvm_arch_invalidate_remote_page(struct kvm *kvm,
+						   unsigned long address)
+{
+	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
+}
+
 struct kvm_vcpu *kvm_arm_get_running_vcpu(void);
 struct kvm_vcpu * __percpu *kvm_get_running_vcpus(void);
 

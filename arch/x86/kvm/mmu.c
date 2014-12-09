@@ -1399,6 +1399,11 @@ int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
 	return kvm_handle_hva(kvm, hva, 0, kvm_unmap_rmapp);
 }
 
+bool kvm_arch_invalidate_remote_page(struct kvm *kvm, unsigned long address)
+{
+	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
+}
+
 int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end)
 {
 	return kvm_handle_hva_range(kvm, start, end, 0, kvm_unmap_rmapp);

@@ -185,6 +185,13 @@ bool kvm_make_all_cpus_request(struct kvm *kvm, unsigned int req)
 	return called;
 }
 
+void kvm_invalidate_remote_page(struct kvm *kvm, unsigned long hva)
+{
+	if (kvm_arch_invalidate_remote_page(kvm, hva))
+		++kvm->stat.remote_tlb_flush;
+}
+EXPORT_SYMBOL_GPL(kvm_invalidate_remote_page);
+
 void kvm_flush_remote_tlbs(struct kvm *kvm)
 {
 	long dirty_count = kvm->tlbs_dirty;
@@ -266,7 +273,7 @@ static void kvm_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 					     unsigned long address)
 {
 	struct kvm *kvm = mmu_notifier_to_kvm(mn);
-	int need_tlb_flush, idx;
+	int need_page_invalidate, idx;
 
 	/*
 	 * When ->invalidate_page runs, the linux pte has been zapped
@@ -290,10 +297,18 @@ static void kvm_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 	spin_lock(&kvm->mmu_lock);
 
 	kvm->mmu_notifier_seq++;
-	need_tlb_flush = kvm_unmap_hva(kvm, address) | kvm->tlbs_dirty;
-	/* we've to flush the tlb before the pages can be freed */
-	if (need_tlb_flush)
+	need_page_invalidate = kvm_unmap_hva(kvm, address);
+	/* we've to flush the tlb before the pages can be freed
+	 * kvm->tlbs_dirty indicate an "all vcpus" tlb flush is needed
+	 */
+	if (kvm->tlbs_dirty) {
 		kvm_flush_remote_tlbs(kvm);
+	} else if (need_page_invalidate) {
+		if (tdp_enabled)
+			kvm_flush_remote_tlbs(kvm);
+		else
+			kvm_invalidate_remote_page(kvm, address);
+	}
 
 	spin_unlock(&kvm->mmu_lock);
 
