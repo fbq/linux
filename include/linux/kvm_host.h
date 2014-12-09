@@ -284,6 +284,45 @@ struct kvm_vcpu {
 	struct kvm_vcpu_arch arch;
 };
 
+struct vcpumask { DECLARE_BITMAP(bits, KVM_MAX_VCPUS); };
+
+static inline struct vcpumask *kvm_vcpumask_alloc(void)
+{
+	struct vcpumask *mask = kzalloc(sizeof(struct vcpumask), GFP_ATOMIC);
+
+	BUG_ON(mask == NULL);
+	return mask;
+}
+static inline void kvm_vcpumask_or(struct vcpumask *dst,
+				   const struct vcpumask *mask1,
+				   const struct vcpumask *mask2)
+{
+	__bitmap_or(dst->bits, mask1->bits, mask2->bits, KVM_MAX_VCPUS);
+}
+
+static inline void kvm_vcpumask_zero(struct vcpumask *mask)
+{
+	memset(mask->bits, 0, sizeof(struct vcpumask));
+}
+
+static inline void kvm_vcpumask_set(struct kvm_vcpu *vcpu,
+				    struct vcpumask *dst)
+{
+	__set_bit(vcpu->vcpu_id, dst->bits);
+}
+
+static inline void kvm_vcpumask_clear(struct kvm_vcpu *vcpu,
+				      struct vcpumask *dst)
+{
+	__clear_bit(vcpu->vcpu_id, dst->bits);
+}
+
+static inline void kvm_vcpumask_free(struct vcpumask *mask)
+{
+	BUG_ON(mask == NULL);
+	kfree(mask);
+}
+
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
 {
 	return cmpxchg(&vcpu->mode, IN_GUEST_MODE, EXITING_GUEST_MODE);
