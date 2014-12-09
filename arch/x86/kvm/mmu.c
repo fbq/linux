@@ -1399,6 +1399,57 @@ int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
 	return kvm_handle_hva(kvm, hva, 0, kvm_unmap_rmapp);
 }
 
+typedef void (*kvm_mmu_page_fn) (struct kvm *kvm,
+				 struct kvm_mmu_page *page,
+				 unsigned long data);
+
+/*
+ * handle_mmu_active_root_page:
+ * reversely walking shadow page table to find all active roots
+ * for a spte and call fn on the root page.
+ * "active" means at least one vcpu is using the root page.
+ *
+ * @sptep: pointer to the spte
+ */
+
+static void handle_mmu_active_root_page(struct kvm *kvm, u64 *sptep,
+					kvm_mmu_page_fn fn,
+					unsigned long data)
+{
+	struct kvm_mmu_page *sp;
+	struct pte_list_desc *desc;
+	int i;
+
+	if (sptep == NULL)
+		return;
+
+	sp = page_header(__pa(sptep));
+
+	if (!sp->parent_ptes && sp->root_count) {
+		fn(kvm, sp, data);
+		return;
+	}
+
+	if (!sp->parent_ptes)
+		return;
+
+	if (!(sp->parent_ptes & 1))
+		handle_mmu_active_root_page(kvm,
+				(u64 *)sp->parent_ptes,
+				fn, data);
+	else {
+		desc = (struct pte_list_desc *)(sp->parent_ptes & ~1ul);
+		while (desc) {
+			for (i = 0; i < PTE_LIST_EXT && desc->sptes[i]; ++i)
+				handle_mmu_active_root_page(kvm,
+						(u64 *)desc->sptes[i],
+						fn, data);
+			desc = desc->more;
+		}
+	}
+
+}
+
 bool kvm_arch_invalidate_remote_page(struct kvm *kvm, unsigned long address)
 {
 	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
