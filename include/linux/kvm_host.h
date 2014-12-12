@@ -286,43 +286,6 @@ struct kvm_vcpu {
 
 struct vcpumask { DECLARE_BITMAP(bits, KVM_MAX_VCPUS); };
 
-static inline struct vcpumask *kvm_vcpumask_alloc(void)
-{
-	struct vcpumask *mask = kzalloc(sizeof(struct vcpumask), GFP_ATOMIC);
-
-	BUG_ON(mask == NULL);
-	return mask;
-}
-static inline void kvm_vcpumask_or(struct vcpumask *dst,
-				   const struct vcpumask *mask1,
-				   const struct vcpumask *mask2)
-{
-	__bitmap_or(dst->bits, mask1->bits, mask2->bits, KVM_MAX_VCPUS);
-}
-
-static inline void kvm_vcpumask_zero(struct vcpumask *mask)
-{
-	memset(mask->bits, 0, sizeof(struct vcpumask));
-}
-
-static inline void kvm_vcpumask_set(struct kvm_vcpu *vcpu,
-				    struct vcpumask *dst)
-{
-	__set_bit(vcpu->vcpu_id, dst->bits);
-}
-
-static inline void kvm_vcpumask_clear(struct kvm_vcpu *vcpu,
-				      struct vcpumask *dst)
-{
-	__clear_bit(vcpu->vcpu_id, dst->bits);
-}
-
-static inline void kvm_vcpumask_free(struct vcpumask *mask)
-{
-	BUG_ON(mask == NULL);
-	kfree(mask);
-}
-
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
 {
 	return cmpxchg(&vcpu->mode, IN_GUEST_MODE, EXITING_GUEST_MODE);
@@ -486,6 +449,66 @@ void kvm_vcpu_uninit(struct kvm_vcpu *vcpu);
 int __must_check vcpu_load(struct kvm_vcpu *vcpu);
 void vcpu_put(struct kvm_vcpu *vcpu);
 
+static inline struct vcpumask *kvm_vcpumask_alloc(void)
+{
+	struct vcpumask *mask = kzalloc(sizeof(struct vcpumask), GFP_ATOMIC);
+
+	BUG_ON(mask == NULL);
+	return mask;
+}
+
+static inline void kvm_vcpumask_or(struct vcpumask *dst,
+				   const struct vcpumask *mask1,
+				   const struct vcpumask *mask2)
+{
+	BUG_ON(dst == NULL || mask1 == NULL || mask2 == NULL);
+	__bitmap_or(dst->bits, mask1->bits, mask2->bits, KVM_MAX_VCPUS);
+}
+
+static inline bool kvm_vcpumask_full(struct vcpumask *mask)
+{
+	BUG_ON(mask == NULL);
+	return bitmap_full(mask->bits, KVM_MAX_VCPUS);
+}
+
+static inline bool kvm_vcpumask_empty(struct vcpumask *mask)
+{
+	BUG_ON(mask == NULL);
+	return bitmap_empty(mask->bits, KVM_MAX_VCPUS);
+}
+
+static inline void kvm_vcpumask_zero(struct vcpumask *mask)
+{
+	BUG_ON(mask == NULL);
+	memset(mask->bits, 0, sizeof(struct vcpumask));
+}
+
+static inline void kvm_vcpumask_set(struct kvm_vcpu *vcpu,
+				    struct vcpumask *dst)
+{
+	BUG_ON(dst == NULL);
+	__set_bit(vcpu->vcpu_id, dst->bits);
+}
+
+static inline int kvm_vcpumask_test(struct kvm_vcpu *vcpu,
+				    struct vcpumask *mask)
+{
+	BUG_ON(mask == NULL);
+	return test_bit(vcpu->vcpu_id, mask->bits);
+}
+
+static inline void kvm_vcpumask_clear(struct kvm_vcpu *vcpu,
+				      struct vcpumask *dst)
+{
+	BUG_ON(dst == NULL);
+	__clear_bit(vcpu->vcpu_id, dst->bits);
+}
+
+static inline void kvm_vcpumask_free(struct vcpumask *mask)
+{
+	kfree(mask);
+}
+
 #ifdef CONFIG_HAVE_KVM_IRQFD
 int kvm_irqfd_init(void);
 void kvm_irqfd_exit(void);
@@ -562,8 +585,6 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
 				enum kvm_mr_change change);
 bool kvm_largepages_enabled(void);
 void kvm_disable_largepages(void);
-/* invalidate one remote page */
-bool kvm_arch_invalidate_remote_page(struct kvm *kvm, unsigned long address);
 /* flush all memory translations */
 void kvm_arch_flush_shadow_all(struct kvm *kvm);
 /* flush memory translations pointing to 'slot' */
@@ -627,6 +648,7 @@ void kvm_load_guest_fpu(struct kvm_vcpu *vcpu);
 void kvm_put_guest_fpu(struct kvm_vcpu *vcpu);
 
 void kvm_flush_remote_tlbs(struct kvm *kvm);
+void kvm_flush_partial_tlbs(struct kvm *kvm, struct vcpumask *mask);
 void kvm_reload_remote_mmus(struct kvm *kvm);
 void kvm_make_mclock_inprogress_request(struct kvm *kvm);
 void kvm_make_scan_ioapic_request(struct kvm *kvm);

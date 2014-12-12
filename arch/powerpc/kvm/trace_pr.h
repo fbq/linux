@@ -277,8 +277,8 @@ TRACE_EVENT(kvm_exit,
 );
 
 TRACE_EVENT(kvm_unmap_hva,
-	TP_PROTO(unsigned long hva),
-	TP_ARGS(hva),
+	TP_PROTO(unsigned long hva, struct vcpumask *vcpus),
+	TP_ARGS(hva, vcpus),
 
 	TP_STRUCT__entry(
 		__field(	unsigned long,	hva		)

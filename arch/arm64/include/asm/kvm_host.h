@@ -174,7 +174,7 @@ int kvm_arm_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
 int kvm_arm_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
+int kvm_unmap_hva(struct kvm *kvm, unsigned long hva, struct vcpumask *vcpus);
 int kvm_unmap_hva_range(struct kvm *kvm,
 			unsigned long start, unsigned long end);
 void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
@@ -194,12 +194,6 @@ static inline int kvm_test_age_hva(struct kvm *kvm, unsigned long hva)
 static inline void kvm_arch_mmu_notifier_invalidate_page(struct kvm *kvm,
 							 unsigned long address)
 {
-}
-
-static inline bool kvm_arch_invalidate_remote_page(struct kvm *kvm,
-						   unsigned long address)
-{
-	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
 }
 
 struct kvm_vcpu *kvm_arm_get_running_vcpu(void);

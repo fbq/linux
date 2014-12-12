@@ -709,7 +709,7 @@ int kvmppc_load_last_inst(struct kvm_vcpu *vcpu, enum instruction_type type,
 
 /************* MMU Notifiers *************/
 
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
+int kvm_unmap_hva(struct kvm *kvm, unsigned long hva, struct vcpumask *vcpus)
 {
 	trace_kvm_unmap_hva(hva);
 

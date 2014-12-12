@@ -1062,7 +1062,7 @@ static void kvm_unmap_hva_handler(struct kvm *kvm, gpa_t gpa, void *data)
 	unmap_stage2_range(kvm, gpa, PAGE_SIZE);
 }
 
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
+int kvm_unmap_hva(struct kvm *kvm, unsigned long hva, struct vcpumask *vcpus)
 {
 	unsigned long end = hva + PAGE_SIZE;
 

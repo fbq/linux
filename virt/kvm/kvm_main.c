@@ -197,8 +197,10 @@ bool kvm_make_mask_vcpus_request(struct kvm *kvm,
 	zalloc_cpumask_var(&cpus, GFP_ATOMIC);
 
 	me = get_cpu();
-	for_each_set_bit(i, mask->bits, KVM_MAX_VCPUS) {
-		vcpu = kvm->vcpus[i];
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		if (!kvm_vcpumask_test(vcpu, mask))
+			continue;
+
 		kvm_make_request(req, vcpu);
 		cpu = vcpu->cpu;
 
@@ -220,12 +222,13 @@ bool kvm_make_mask_vcpus_request(struct kvm *kvm,
 	return called;
 }
 
-void kvm_invalidate_remote_page(struct kvm *kvm, unsigned long hva)
+void kvm_flush_partial_tlbs(struct kvm *kvm,
+			    struct vcpumask *mask)
 {
-	if (kvm_arch_invalidate_remote_page(kvm, hva))
+	if (kvm_make_mask_vcpus_request(kvm, mask, KVM_REQ_TLB_FLUSH))
 		++kvm->stat.remote_tlb_flush;
 }
-EXPORT_SYMBOL_GPL(kvm_invalidate_remote_page);
+EXPORT_SYMBOL_GPL(kvm_flush_partial_tlbs);
 
 void kvm_flush_remote_tlbs(struct kvm *kvm)
 {
@@ -308,7 +311,10 @@ static void kvm_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 					     unsigned long address)
 {
 	struct kvm *kvm = mmu_notifier_to_kvm(mn);
-	int need_page_invalidate, idx;
+	int need_tlb_flush, idx;
+	struct vcpumask mask;
+
+	kvm_vcpumask_zero(&mask);
 
 	/*
 	 * When ->invalidate_page runs, the linux pte has been zapped
@@ -332,18 +338,13 @@ static void kvm_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 	spin_lock(&kvm->mmu_lock);
 
 	kvm->mmu_notifier_seq++;
-	need_page_invalidate = kvm_unmap_hva(kvm, address);
-	/* we've to flush the tlb before the pages can be freed
-	 * kvm->tlbs_dirty indicate an "all vcpus" tlb flush is needed
-	 */
-	if (kvm->tlbs_dirty) {
+	need_tlb_flush = kvm_unmap_hva(kvm, address, &mask);
+	/* we've to flush the tlb before the pages can be freed */
+	
+	if (kvm->tlbs_dirty)
 		kvm_flush_remote_tlbs(kvm);
-	} else if (need_page_invalidate) {
-		if (tdp_enabled)
-			kvm_flush_remote_tlbs(kvm);
-		else
-			kvm_invalidate_remote_page(kvm, address);
-	}
+	else if (need_tlb_flush)
+		kvm_flush_partial_tlbs(kvm, &mask);
 
 	spin_unlock(&kvm->mmu_lock);
 

@@ -1325,6 +1325,93 @@ static int kvm_set_pte_rmapp(struct kvm *kvm, unsigned long *rmapp,
 	return 0;
 }
 
+typedef void (*kvm_mmu_page_fn) (struct kvm *kvm,
+				 struct kvm_mmu_page *page,
+				 unsigned long data);
+
+/*
+ * handle_mmu_active_root_page:
+ * reversely walking shadow page table to find all active roots
+ * for a spte and call fn on the root page.
+ * "active" means at least one vcpu is using the root page.
+ *
+ * @sptep: pointer to the spte
+ */
+
+static void handle_mmu_active_root_page(struct kvm *kvm, u64 *sptep,
+					kvm_mmu_page_fn fn,
+					unsigned long data)
+{
+	struct kvm_mmu_page *sp;
+	struct pte_list_desc *desc;
+	int i;
+
+	if (sptep == NULL)
+		return;
+
+	sp = page_header(__pa(sptep));
+
+	if (!sp->parent_ptes && sp->root_count) {
+		fn(kvm, sp, data);
+		return;
+	}
+
+	if (!sp->parent_ptes)
+		return;
+
+	if (!(sp->parent_ptes & 1))
+		handle_mmu_active_root_page(kvm,
+				(u64 *)sp->parent_ptes,
+				fn, data);
+	else {
+		desc = (struct pte_list_desc *)(sp->parent_ptes & ~1ul);
+		while (desc) {
+			for (i = 0; i < PTE_LIST_EXT && desc->sptes[i]; ++i)
+				handle_mmu_active_root_page(kvm,
+						(u64 *)desc->sptes[i],
+						fn, data);
+			desc = desc->more;
+		}
+	}
+
+}
+
+static void add_roots_to_mask(struct kvm *kvm,
+			      struct kvm_mmu_page *page,
+			      unsigned long data)
+{
+	struct vcpumask *vcpus = (struct vcpumask *)data;
+
+	kvm_vcpumask_or(vcpus, page->roots, vcpus);
+}
+
+static int kvm_unmap_rmapp_and_mask_vcpus(struct kvm *kvm,
+					  unsigned long *rmapp,
+					  struct kvm_memory_slot *slot,
+					  gfn_t gfn,
+					  int level,
+					  unsigned long data)
+{
+	u64 *sptep;
+	struct vcpumask *vcpus = (struct vcpumask *)data;
+	struct rmap_iterator iter;
+	int need_tlb_flush = 0;
+
+	while ((sptep = rmap_get_first(*rmapp, &iter))) {
+		BUG_ON(!(*sptep & PT_PRESENT_MASK));
+		rmap_printk("kvm_rmap_unmap_hva: spte %p %llx gfn %llx (%d)\n",
+			     sptep, *sptep, gfn, level);
+
+		handle_mmu_active_root_page(kvm, sptep, add_roots_to_mask,
+					  (unsigned long)vcpus);
+
+		drop_spte(kvm, sptep);
+		need_tlb_flush = 1;
+	}
+
+	return need_tlb_flush;
+}
+
 static int kvm_handle_hva_range(struct kvm *kvm,
 				unsigned long start,
 				unsigned long end,
@@ -1394,105 +1481,11 @@ static int kvm_handle_hva(struct kvm *kvm, unsigned long hva,
 	return kvm_handle_hva_range(kvm, hva, hva + 1, data, handler);
 }
 
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
+int kvm_unmap_hva(struct kvm *kvm, unsigned long hva, struct vcpumask *vcpus)
 {
-	return kvm_handle_hva(kvm, hva, 0, kvm_unmap_rmapp);
-}
 
-typedef void (*kvm_mmu_page_fn) (struct kvm *kvm,
-				 struct kvm_mmu_page *page,
-				 unsigned long data);
-
-/*
- * handle_mmu_active_root_page:
- * reversely walking shadow page table to find all active roots
- * for a spte and call fn on the root page.
- * "active" means at least one vcpu is using the root page.
- *
- * @sptep: pointer to the spte
- */
-
-static void handle_mmu_active_root_page(struct kvm *kvm, u64 *sptep,
-					kvm_mmu_page_fn fn,
-					unsigned long data)
-{
-	struct kvm_mmu_page *sp;
-	struct pte_list_desc *desc;
-	int i;
-
-	if (sptep == NULL)
-		return;
-
-	sp = page_header(__pa(sptep));
-
-	if (!sp->parent_ptes && sp->root_count) {
-		fn(kvm, sp, data);
-		return;
-	}
-
-	if (!sp->parent_ptes)
-		return;
-
-	if (!(sp->parent_ptes & 1))
-		handle_mmu_active_root_page(kvm,
-				(u64 *)sp->parent_ptes,
-				fn, data);
-	else {
-		desc = (struct pte_list_desc *)(sp->parent_ptes & ~1ul);
-		while (desc) {
-			for (i = 0; i < PTE_LIST_EXT && desc->sptes[i]; ++i)
-				handle_mmu_active_root_page(kvm,
-						(u64 *)desc->sptes[i],
-						fn, data);
-			desc = desc->more;
-		}
-	}
-
-}
-
-static void add_roots_to_mask(struct kvm *kvm,
-			      struct kvm_mmu_page *page,
-			      unsigned long data)
-{
-	struct vcpumask *vcpus = (struct vcpumask *)data;
-
-	kvm_vcpumask_or(vcpus, page->roots, vcpus);
-}
-
-static int vcpus_need_tlb_flush(struct kvm *kvm, unsigned long *rmapp,
-				struct kvm_memory_slot *slot,
-				gfn_t gfn,
-				int level,
-				unsigned long data)
-{
-	u64 *sptep;
-	struct vcpumask *vcpus = (struct vcpumask *)data;
-	struct rmap_iterator iter;
-
-	for (sptep = rmap_get_first(*rmapp, &iter); sptep;) {
-		BUG_ON(!is_shadow_present_pte(*sptep));
-		handle_mmu_active_root_page(kvm, sptep, add_roots_to_mask,
-					  (unsigned long)vcpus);
-		sptep = rmap_get_next(&iter);
-	}
-	return 0;
-}
-
-static bool kvm_mmu_find_vcpus_need_tlb_flush(struct kvm *kvm,
-					      unsigned long hva,
-					      struct vcpumask *vcpus)
-{
 	return kvm_handle_hva(kvm, hva, (unsigned long)vcpus,
-			vcpus_need_tlb_flush);
-}
-
-bool kvm_arch_invalidate_remote_page(struct kvm *kvm, unsigned long address)
-{
-	struct vcpumask vcpus;
-
-	kvm_mmu_find_vcpus_need_tlb_flush(kvm, address, &vcpus);
-
-	return kvm_make_mask_vcpus_request(kvm, &vcpus, KVM_REQ_TLB_FLUSH);
+			kvm_unmap_rmapp_and_mask_vcpus);
 }
 
 int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end)
@@ -3080,7 +3073,8 @@ static inline void mmu_root_page_set_root(struct kvm_mmu_page *sp,
 static inline void mmu_root_page_clear_root(struct kvm_mmu_page *sp,
 					    struct kvm_vcpu *vcpu)
 {
-	kvm_vcpumask_clear(vcpu, sp->roots);
+	if (sp->roots)
+		kvm_vcpumask_clear(vcpu, sp->roots);
 }
 
 static void mmu_free_roots(struct kvm_vcpu *vcpu)

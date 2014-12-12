@@ -776,7 +776,7 @@ void kvmppc_core_commit_memory_region(struct kvm *kvm,
 	kvm->arch.kvm_ops->commit_memory_region(kvm, mem, old);
 }
 
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
+int kvm_unmap_hva(struct kvm *kvm, unsigned long hva, struct vcpumask *vcpu)
 {
 	return kvm->arch.kvm_ops->unmap_hva(kvm, hva);
 }

@@ -53,7 +53,8 @@
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
 
-extern int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
+extern int kvm_unmap_hva(struct kvm *kvm, unsigned long hva,
+			 struct vcpumask *vcpus);
 extern int kvm_unmap_hva_range(struct kvm *kvm,
 			       unsigned long start, unsigned long end);
 extern int kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end);
@@ -63,12 +64,6 @@ extern void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
 static inline void kvm_arch_mmu_notifier_invalidate_page(struct kvm *kvm,
 							 unsigned long address)
 {
-}
-
-static inline bool kvm_arch_invalidate_remote_page(struct kvm *kvm,
-						   unsigned long address)
-{
-	return kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
 }
 
 #define HPTEG_CACHE_NUM			(1 << 15)
