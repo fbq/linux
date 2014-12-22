@@ -284,6 +284,8 @@ struct kvm_vcpu {
 	struct kvm_vcpu_arch arch;
 };
 
+struct vcpumask { DECLARE_BITMAP(bits, KVM_MAX_VCPUS); };
+
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
 {
 	return cmpxchg(&vcpu->mode, IN_GUEST_MODE, EXITING_GUEST_MODE);
@@ -446,6 +448,63 @@ void kvm_vcpu_uninit(struct kvm_vcpu *vcpu);
 
 int __must_check vcpu_load(struct kvm_vcpu *vcpu);
 void vcpu_put(struct kvm_vcpu *vcpu);
+
+/*
+ * bitmap operations for vcpumask:
+ * no guarantee for atomicity for all operations, and NULL pointer checking
+ * should be done by callers.
+ */
+
+static inline struct vcpumask *kvm_vcpumask_alloc(void)
+{
+	/* TODO: better to use a kmem_cache */
+	return kzalloc(sizeof(struct vcpumask), GFP_ATOMIC);
+}
+
+static inline void kvm_vcpumask_or(struct vcpumask *dst,
+				   const struct vcpumask *mask1,
+				   const struct vcpumask *mask2)
+{
+	__bitmap_or(dst->bits, mask1->bits, mask2->bits, KVM_MAX_VCPUS);
+}
+
+static inline bool kvm_vcpumask_full(struct vcpumask *mask)
+{
+	return bitmap_full(mask->bits, KVM_MAX_VCPUS);
+}
+
+static inline bool kvm_vcpumask_empty(struct vcpumask *mask)
+{
+	return bitmap_empty(mask->bits, KVM_MAX_VCPUS);
+}
+
+static inline void kvm_vcpumask_zero(struct vcpumask *mask)
+{
+	memset(mask->bits, 0, sizeof(struct vcpumask));
+}
+
+static inline void kvm_vcpumask_set(struct kvm_vcpu *vcpu,
+				    struct vcpumask *dst)
+{
+	__set_bit(vcpu->vcpu_id, dst->bits);
+}
+
+static inline int kvm_vcpumask_test(struct kvm_vcpu *vcpu,
+				    struct vcpumask *mask)
+{
+	return test_bit(vcpu->vcpu_id, mask->bits);
+}
+
+static inline void kvm_vcpumask_clear(struct kvm_vcpu *vcpu,
+				      struct vcpumask *dst)
+{
+	__clear_bit(vcpu->vcpu_id, dst->bits);
+}
+
+static inline void kvm_vcpumask_free(struct vcpumask *mask)
+{
+	kfree(mask);
+}
 
 #ifdef CONFIG_HAVE_KVM_IRQFD
 int kvm_irqfd_init(void);
