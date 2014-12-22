@@ -185,6 +185,59 @@ bool kvm_make_all_cpus_request(struct kvm *kvm, unsigned int req)
 	return called;
 }
 
+/*
+ * kvm_make_mask_vcpus_request:
+ * send requests to vcpus masked by bitmap @mask,
+ * a NULL @mask indicates a kvm_make_all_cpu_request
+ */
+bool kvm_make_mask_vcpus_request(struct kvm *kvm,
+				 struct vcpumask *mask,
+				 unsigned int req)
+{
+	int i, cpu, me;
+	cpumask_var_t cpus;
+	bool called = true;
+	struct kvm_vcpu *vcpu;
+
+	if (!mask)
+		kvm_make_all_cpus_request(kvm, req);
+
+	zalloc_cpumask_var(&cpus, GFP_ATOMIC);
+
+	me = get_cpu();
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		if (!kvm_vcpumask_test(vcpu, mask))
+			continue;
+
+		kvm_make_request(req, vcpu);
+		cpu = vcpu->cpu;
+
+		/* Set ->requests bit before we read ->mode */
+		smp_mb();
+
+		if (cpus != NULL && cpu != -1 && cpu != me &&
+		      kvm_vcpu_exiting_guest_mode(vcpu) != OUTSIDE_GUEST_MODE)
+			cpumask_set_cpu(cpu, cpus);
+	}
+	if (unlikely(cpus == NULL))
+		smp_call_function_many(cpu_online_mask, ack_flush, NULL, 1);
+	else if (!cpumask_empty(cpus))
+		smp_call_function_many(cpus, ack_flush, NULL, 1);
+	else
+		called = false;
+	put_cpu();
+	free_cpumask_var(cpus);
+	return called;
+}
+
+void kvm_flush_partial_tlbs(struct kvm *kvm,
+			    struct vcpumask *mask)
+{
+	if (kvm_make_mask_vcpus_request(kvm, mask, KVM_REQ_TLB_FLUSH))
+		++kvm->stat.remote_tlb_flush;
+}
+EXPORT_SYMBOL_GPL(kvm_flush_partial_tlbs);
+
 void kvm_flush_remote_tlbs(struct kvm *kvm)
 {
 	long dirty_count = kvm->tlbs_dirty;
