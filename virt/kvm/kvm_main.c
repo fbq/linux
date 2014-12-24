@@ -343,7 +343,7 @@ static void kvm_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 	spin_lock(&kvm->mmu_lock);
 
 	kvm->mmu_notifier_seq++;
-	need_tlb_flush = kvm_unmap_hva(kvm, address) | kvm->tlbs_dirty;
+	need_tlb_flush = kvm_unmap_hva(kvm, address);
 	/* we've to flush the tlb before the pages can be freed */
 	if (need_tlb_flush)
 		kvm_flush_remote_tlbs(kvm);

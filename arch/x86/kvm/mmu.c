@@ -1376,6 +1376,43 @@ static void handle_mmu_active_root_page(struct kvm *kvm, u64 *sptep,
 
 }
 
+static void add_roots_to_mask(struct kvm *kvm,
+			      struct kvm_mmu_page *page,
+			      unsigned long data)
+{
+	struct vcpumask *vcpus = (struct vcpumask *)data;
+
+	if (vcpus)
+		kvm_vcpumask_or(vcpus, page->roots, vcpus);
+}
+
+static int kvm_unmap_rmapp_and_mask_vcpus(struct kvm *kvm,
+					  unsigned long *rmapp,
+					  struct kvm_memory_slot *slot,
+					  gfn_t gfn,
+					  int level,
+					  unsigned long data)
+{
+	u64 *sptep;
+	struct vcpumask *vcpus = (struct vcpumask *)data;
+	struct rmap_iterator iter;
+	int need_tlb_flush = 0;
+
+	while ((sptep = rmap_get_first(*rmapp, &iter))) {
+		BUG_ON(!(*sptep & PT_PRESENT_MASK));
+		rmap_printk("kvm_rmap_unmap_hva: spte %p %llx gfn %llx (%d)\n",
+			     sptep, *sptep, gfn, level);
+
+		handle_mmu_active_root_page(kvm, sptep, add_roots_to_mask,
+				(unsigned long)vcpus);
+
+		drop_spte(kvm, sptep);
+		need_tlb_flush = 1;
+	}
+
+	return need_tlb_flush;
+}
+
 static int kvm_handle_hva_range(struct kvm *kvm,
 				unsigned long start,
 				unsigned long end,
@@ -1447,7 +1484,19 @@ static int kvm_handle_hva(struct kvm *kvm, unsigned long hva,
 
 int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
 {
-	return kvm_handle_hva(kvm, hva, 0, kvm_unmap_rmapp);
+	struct vcpumask vcpus;
+
+	kvm_vcpumask_zero(&vcpus);
+
+	if (!kvm->tlbs_dirty) {
+		if (kvm_handle_hva(kvm, hva, (unsigned long)&vcpus,
+				kvm_unmap_rmapp_and_mask_vcpus))
+			kvm_flush_partial_tlbs(kvm, &vcpus);
+		return 0;
+	}
+
+	kvm_handle_hva(kvm, hva, 0, kvm_unmap_rmapp);
+	return 1;
 }
 
 int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end)
