@@ -119,7 +119,7 @@
  * PATH_MAX includes the nul terminator --RR.
  */
 
-#define EMBEDDED_NAME_MAX	(PATH_MAX - offsetof(struct filename, iname))
+#define EMBEDDED_NAME_MAX	(PATH_MAX - sizeof(struct filename))
 
 struct filename *
 getname_flags(const char __user *filename, int flags, int *empty)
@@ -132,44 +132,53 @@ getname_flags(const char __user *filename, int flags, int *empty)
 	if (result)
 		return result;
 
-	result = __getname();
-	if (unlikely(!result))
+	kname = __getname();
+	if (unlikely(!kname))
 		return ERR_PTR(-ENOMEM);
 
 	/*
 	 * First, try to embed the struct filename inside the names_cache
 	 * allocation
 	 */
-	kname = (char *)result->iname;
+	result = (struct filename *)(kname + EMBEDDED_NAME_MAX);
 	result->name = kname;
 
 	len = strncpy_from_user(kname, filename, EMBEDDED_NAME_MAX);
 	if (unlikely(len < 0)) {
-		__putname(result);
+		__putname(kname);
 		return ERR_PTR(len);
 	}
 
 	/*
 	 * Uh-oh. We have a name that's approaching PATH_MAX. Allocate a
 	 * separate struct filename so we can dedicate the entire
-	 * names_cache allocation for the pathname, and re-do the copy from
+	 * names_cache allocation for the pathname, and continue the copy from
 	 * userland.
 	 */
 	if (unlikely(len == EMBEDDED_NAME_MAX)) {
-		kname = (char *)result;
-
 		result = kzalloc(sizeof(*result), GFP_KERNEL);
 		if (unlikely(!result)) {
 			__putname(kname);
 			return ERR_PTR(-ENOMEM);
 		}
 		result->name = kname;
-		len = strncpy_from_user(kname, filename, PATH_MAX);
+		/* we can't simply add the number of rest chars we copy to len,
+		 * since strncpy_from_user may return negative to indicate
+		 * something is wrong, so we do the addition later, after
+		 * strncpy_from_user succeeds, and we know we already copy
+		 * EMBEDDED_NAME_MAX chars.
+		 */
+		len = strncpy_from_user(kname + EMBEDDED_NAME_MAX,
+				filename + EMBEDDED_NAME_MAX,
+				PATH_MAX - EMBEDDED_NAME_MAX);
+
 		if (unlikely(len < 0)) {
 			__putname(kname);
 			kfree(result);
 			return ERR_PTR(len);
 		}
+
+		len += EMBEDDED_NAME_MAX;
 		if (unlikely(len == PATH_MAX)) {
 			__putname(kname);
 			kfree(result);
@@ -204,26 +213,28 @@ struct filename *
 getname_kernel(const char * filename)
 {
 	struct filename *result;
+	char *kname;
 	int len = strlen(filename) + 1;
 
-	result = __getname();
-	if (unlikely(!result))
+	kname = __getname();
+	if (unlikely(!kname))
 		return ERR_PTR(-ENOMEM);
 
 	if (len <= EMBEDDED_NAME_MAX) {
-		result->name = (char *)result->iname;
+		result = (struct filename *)(kname + EMBEDDED_NAME_MAX);
+		result->name = kname;
 	} else if (len <= PATH_MAX) {
 		struct filename *tmp;
 
 		tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
 		if (unlikely(!tmp)) {
-			__putname(result);
+			__putname(kname);
 			return ERR_PTR(-ENOMEM);
 		}
-		tmp->name = (char *)result;
+		tmp->name = kname;
 		result = tmp;
 	} else {
-		__putname(result);
+		__putname(kname);
 		return ERR_PTR(-ENAMETOOLONG);
 	}
 	memcpy((char *)result->name, filename, len);
@@ -242,11 +253,11 @@ void putname(struct filename *name)
 	if (--name->refcnt > 0)
 		return;
 
-	if (name->name != name->iname) {
+	if (name->name != ((char *)name - EMBEDDED_NAME_MAX)) {
 		__putname(name->name);
 		kfree(name);
 	} else
-		__putname(name);
+		__putname(name->name);
 }
 
 static int check_acl(struct inode *inode, int mask)

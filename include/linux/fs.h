@@ -2166,7 +2166,6 @@ struct filename {
 	const __user char	*uptr;	/* original userland pointer */
 	struct audit_names	*aname;
 	int			refcnt;
-	const char		iname[];
 };
 
 extern long vfs_truncate(struct path *, loff_t);
