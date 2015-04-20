@@ -199,11 +199,23 @@ error:
 	return err;
 }
 
+/**
+ * getname() - Get a file name copy from userland
+ * @filename: userland pointer to the file name
+ *
+ * If successful, return a 'struct filename' pointer and ->name is the pointer
+ * to the kernel copy of the file name, otherwise an ERR_PTR.
+ *
+ * getname() should only be called in a system call context, and for each
+ * getname() that returns a successful value, callers must ensure exactly one
+ * corresponding putname() is called before returning to userland.
+ */
 struct filename *
 getname(const char __user * filename)
 {
 	return getname_flags(filename, 0, NULL);
 }
+EXPORT_SYMBOL(getname);
 
 struct filename *
 getname_kernel(const char * filename)
@@ -242,6 +254,11 @@ getname_kernel(const char * filename)
 	return result;
 }
 
+/* putname() - Release a 'struct filename' structure
+ * @name: the 'struct filename' structure to be release
+ *
+ * See more at getname()
+ */
 void putname(struct filename *name)
 {
 	BUG_ON(name->refcnt <= 0);
@@ -255,6 +272,7 @@ void putname(struct filename *name)
 	} else
 		__putname(name);
 }
+EXPORT_SYMBOL(putname);
 
 static int check_acl(struct inode *inode, int mask)
 {
