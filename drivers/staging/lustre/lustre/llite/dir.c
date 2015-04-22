@@ -1216,30 +1216,6 @@ out:
 	return rc;
 }
 
-static char *
-ll_getname(const char __user *filename)
-{
-	int ret = 0, len;
-	char *tmp = __getname();
-
-	if (!tmp)
-		return ERR_PTR(-ENOMEM);
-
-	len = strncpy_from_user(tmp, filename, PATH_MAX);
-	if (len == 0)
-		ret = -ENOENT;
-	else if (len > PATH_MAX)
-		ret = -ENAMETOOLONG;
-
-	if (ret) {
-		__putname(tmp);
-		tmp =  ERR_PTR(ret);
-	}
-	return tmp;
-}
-
-#define ll_putname(filename) __putname(filename)
-
 static long ll_dir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(file);
@@ -1441,7 +1417,7 @@ free_lmv:
 		return rc;
 	}
 	case LL_IOC_REMOVE_ENTRY: {
-		char		*filename = NULL;
+		struct filename *name = NULL;
 		int		 namelen = 0;
 		int		 rc;
 
@@ -1453,20 +1429,16 @@ free_lmv:
 		if (!(exp_connect_flags(sbi->ll_md_exp) & OBD_CONNECT_LVB_TYPE))
 			return -ENOTSUPP;
 
-		filename = ll_getname((const char *)arg);
-		if (IS_ERR(filename))
-			return PTR_ERR(filename);
+		name = getname((const char *)arg);
+		if (IS_ERR(name))
+			return PTR_ERR(name);
 
-		namelen = strlen(filename);
-		if (namelen < 1) {
-			rc = -EINVAL;
-			goto out_rmdir;
-		}
+		namelen = strlen(name->name);
 
-		rc = ll_rmdir_entry(inode, filename, namelen);
-out_rmdir:
-		if (filename)
-			ll_putname(filename);
+		rc = ll_rmdir_entry(inode, name->name, namelen);
+
+		if (name)
+			putname(name);
 		return rc;
 	}
 	case LL_IOC_LOV_SWAP_LAYOUTS:
@@ -1481,16 +1453,16 @@ out_rmdir:
 		struct lov_user_md *lump;
 		struct lov_mds_md *lmm = NULL;
 		struct mdt_body *body;
-		char *filename = NULL;
+		struct filename *name = NULL;
 		int lmmsize;
 
 		if (cmd == IOC_MDC_GETFILEINFO ||
 		    cmd == IOC_MDC_GETFILESTRIPE) {
-			filename = ll_getname((const char *)arg);
-			if (IS_ERR(filename))
-				return PTR_ERR(filename);
+			name = getname((const char *)arg);
+			if (IS_ERR(name))
+				return PTR_ERR(name);
 
-			rc = ll_lov_getstripe_ea_info(inode, filename, &lmm,
+			rc = ll_lov_getstripe_ea_info(inode, name->name, &lmm,
 						      &lmmsize, &request);
 		} else {
 			rc = ll_dir_getstripe(inode, &lmm, &lmmsize, &request);
@@ -1556,8 +1528,8 @@ skip_lmm:
 
 out_req:
 		ptlrpc_req_finished(request);
-		if (filename)
-			ll_putname(filename);
+		if (name)
+			putname(name);
 		return rc;
 	}
 	case IOC_LOV_GETINFO: {

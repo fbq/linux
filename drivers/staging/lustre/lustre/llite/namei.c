@@ -867,7 +867,7 @@ static inline void ll_get_child_fid(struct dentry *child, struct lu_fid *fid)
 /**
  * Remove dir entry
  **/
-int ll_rmdir_entry(struct inode *dir, char *name, int namelen)
+int ll_rmdir_entry(struct inode *dir, const char *name, int namelen)
 {
 	struct ptlrpc_request *request = NULL;
 	struct md_op_data *op_data;
