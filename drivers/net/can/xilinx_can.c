@@ -1185,7 +1185,7 @@ static int xcan_remove(struct platform_device *pdev)
 }
 
 /* Match table for OF platform binding */
-static struct of_device_id xcan_of_match[] = {
+static const struct of_device_id xcan_of_match[] = {
 	{ .compatible = "xlnx,zynq-can-1.0", },
 	{ .compatible = "xlnx,axi-can-1.00.a", },
 	{ /* end of list */ },
@@ -1196,7 +1196,6 @@ static struct platform_driver xcan_driver = {
 	.probe = xcan_probe,
 	.remove	= xcan_remove,
 	.driver	= {
-		.owner = THIS_MODULE,
 		.name = DRIVER_NAME,
 		.pm = &xcan_dev_pm_ops,
 		.of_match_table	= xcan_of_match,
