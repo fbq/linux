@@ -48,4 +48,8 @@ struct hlist_node {
 	struct hlist_node *next, **pprev;
 };
 
+typedef __u16 __bitwise__ __virtio16;
+typedef __u32 __bitwise__ __virtio32;
+typedef __u64 __bitwise__ __virtio64;
+
 #endif /* LINUX_TYPES_H */
