@@ -15,11 +15,25 @@
 #include <linux/spinlock.h>
 #include <linux/seqlock.h>
 #include <linux/atomic.h>
+#include <linux/nsproxy.h>
+#include <linux/ns_common.h>
 
 struct super_block;
 struct vfsmount;
 struct dentry;
-struct mnt_namespace;
+
+struct mnt_namespace {
+	atomic_t		count;
+	struct ns_common	ns;
+	struct mount *	root;
+	struct list_head	list;
+	struct user_namespace	*user_ns;
+	u64			seq;	/* Sequence number to prevent loops */
+	wait_queue_head_t poll;
+	u64 event;
+	seqlock_t		ns_rename_lock;
+};
+
 
 #define MNT_NOSUID	0x01
 #define MNT_NODEV	0x02

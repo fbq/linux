@@ -84,10 +84,6 @@
 int sysctl_vfs_cache_pressure __read_mostly = 100;
 EXPORT_SYMBOL_GPL(sysctl_vfs_cache_pressure);
 
-__cacheline_aligned_in_smp DEFINE_SEQLOCK(rename_lock);
-
-EXPORT_SYMBOL(rename_lock);
-
 static struct kmem_cache *dentry_cache __read_mostly;
 
 /*

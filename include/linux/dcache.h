@@ -10,6 +10,7 @@
 #include <linux/cache.h>
 #include <linux/rcupdate.h>
 #include <linux/lockref.h>
+#include <linux/mount.h>
 
 struct path;
 struct vfsmount;
@@ -226,7 +227,7 @@ struct dentry_operations {
 #define DCACHE_MAY_FREE			0x00800000
 #define DCACHE_FALLTHRU			0x01000000 /* Fall through to lower layer */
 
-extern seqlock_t rename_lock;
+#define rename_lock (current->nsproxy->mnt_ns->ns_rename_lock)
 
 /*
  * These are the low-level FS interfaces to the dcache..
