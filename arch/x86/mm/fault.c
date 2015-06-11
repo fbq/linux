@@ -188,7 +188,6 @@ force_sig_info_fault(int si_signo, int si_code, unsigned long address,
 }
 
 DEFINE_SPINLOCK(pgd_lock);
-LIST_HEAD(pgd_list);
 
 #ifdef CONFIG_X86_32
 static inline pmd_t *vmalloc_sync_one(pgd_t *pgd, unsigned long address)
