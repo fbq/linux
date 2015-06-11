@@ -391,6 +391,65 @@ out:
 	return NULL;
 }
 
+/*
+ * Initialize the kernel portion of the PGD.
+ *
+ * This is done separately, because pgd_alloc() happens when
+ * the task is not on the task list yet - and PGD updates
+ * happen by walking the task list.
+ *
+ * No locking is needed here, as we just copy over the reference
+ * PGD. The reference PGD (pgtable_init) is only ever expanded
+ * at the highest, PGD level. Thus any other task extending it
+ * will first update the reference PGD, then modify the task PGDs.
+ */
+void arch_pgd_init_late(struct mm_struct *mm)
+{
+	/*
+	 * This function is called after a new MM has been made visible
+	 * in fork() or exec() via:
+	 *
+	 *   tsk->mm = mm;
+	 *
+	 * This barrier makes sure the MM is visible to new RCU
+	 * walkers before we read and initialize the pagetables below,
+	 * so that we don't miss updates:
+	 */
+	smp_mb();
+
+	/*
+	 * If the pgd points to a shared pagetable level (either the
+	 * ptes in non-PAE, or shared PMD in PAE), then just copy the
+	 * references from swapper_pg_dir:
+	 */
+	if ( CONFIG_PGTABLE_LEVELS == 2 ||
+	    (CONFIG_PGTABLE_LEVELS == 3 && SHARED_KERNEL_PMD) ||
+	     CONFIG_PGTABLE_LEVELS == 4) {
+
+		pgd_t *pgd_src = swapper_pg_dir + KERNEL_PGD_BOUNDARY;
+		pgd_t *pgd_dst =        mm->pgd + KERNEL_PGD_BOUNDARY;
+		int i;
+
+		for (i = 0; i < KERNEL_PGD_PTRS; i++, pgd_src++, pgd_dst++) {
+			/*
+			 * This is lock-less, so it can race with PGD updates
+			 * coming from vmalloc() or CPA methods, but it's safe,
+			 * because:
+			 *
+			 * 1) this PGD is not in use yet, we have still not
+			 *    scheduled this task.
+			 * 2) we only ever extend PGD entries
+			 *
+			 * So if we observe a non-zero PGD entry we can copy it,
+			 * it won't change from under us. Parallel updates (new
+			 * allocations) will modify our (already visible) PGD:
+			 */
+			if (!pgd_none(*pgd_src))
+				set_pgd(pgd_dst, *pgd_src);
+		}
+	}
+}
+
 void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
 	pgd_mop_up_pmds(mm, pgd);
