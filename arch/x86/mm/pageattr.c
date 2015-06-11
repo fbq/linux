@@ -718,18 +718,6 @@ static bool try_to_free_pmd_page(pmd_t *pmd)
 	return true;
 }
 
-static bool try_to_free_pud_page(pud_t *pud)
-{
-	int i;
-
-	for (i = 0; i < PTRS_PER_PUD; i++)
-		if (!pud_none(pud[i]))
-			return false;
-
-	free_page((unsigned long)pud);
-	return true;
-}
-
 static bool unmap_pte_range(pmd_t *pmd, unsigned long start, unsigned long end)
 {
 	pte_t *pte = pte_offset_kernel(pmd, start);
@@ -848,9 +836,6 @@ static void unmap_pgd_range(pgd_t *root, unsigned long addr, unsigned long end)
 	pgd_t *pgd_entry = root + pgd_index(addr);
 
 	unmap_pud_range(pgd_entry, addr, end);
-
-	if (try_to_free_pud_page((pud_t *)pgd_page_vaddr(*pgd_entry)))
-		pgd_clear(pgd_entry);
 }
 
 static int alloc_pte_page(pmd_t *pmd)
