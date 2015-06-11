@@ -13,6 +13,7 @@
 #include <linux/pfn.h>
 #include <linux/percpu.h>
 #include <linux/gfp.h>
+#include <linux/oom.h>
 #include <linux/pci.h>
 #include <linux/vmalloc.h>
 
@@ -439,17 +440,34 @@ static void __set_pmd_pte(pte_t *kpte, unsigned long address, pte_t pte)
 	set_pte_atomic(kpte, pte);
 #ifdef CONFIG_X86_32
 	if (!SHARED_KERNEL_PMD) {
-		struct page *page;
+		struct task_struct *g;
 
-		list_for_each_entry(page, &pgd_list, lru) {
+		/* We are holding pgd_lock, which implies rcu_read_lock(): */
+
+		for_each_process(g) {
+			struct task_struct *p;
+			struct mm_struct *mm;
+			spinlock_t *pgt_lock;
 			pgd_t *pgd;
 			pud_t *pud;
 			pmd_t *pmd;
 
-			pgd = (pgd_t *)page_address(page) + pgd_index(address);
+			p = find_lock_task_mm(g);
+			if (!p)
+				continue;
+
+			mm = p->mm;
+			pgt_lock = &mm->page_table_lock;
+			spin_lock(pgt_lock);
+
+			pgd = mm->pgd + pgd_index(address);
 			pud = pud_offset(pgd, address);
 			pmd = pmd_offset(pud, address);
 			set_pte_atomic((pte_t *)pmd, pte);
+
+			spin_unlock(pgt_lock);
+
+			task_unlock(p);
 		}
 	}
 #endif
