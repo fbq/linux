@@ -161,10 +161,10 @@ static int __init nonx32_setup(char *str)
 __setup("noexec32=", nonx32_setup);
 
 /*
- * When memory was added/removed make sure all the process MMs have
+ * When memory was added make sure all the process MMs have
  * matching PGD entries in the local PGD level page as well.
  */
-void sync_global_pgds(unsigned long start, unsigned long end, int removed)
+void sync_global_pgds(unsigned long start, unsigned long end)
 {
 	unsigned long address;
 
@@ -172,14 +172,8 @@ void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 		const pgd_t *pgd_ref = pgd_offset_k(address);
 		struct task_struct *g;
 
-		/*
-		 * When this function is called after memory hot remove,
-		 * pgd_none() already returns true, but only the reference
-		 * kernel PGD has been cleared, not the process PGDs.
-		 *
-		 * So clear the affected entries in every process PGD as well:
-		 */
-		if (pgd_none(*pgd_ref) && !removed)
+		/* Only sync (potentially) newly added PGD entries: */
+		if (pgd_none(*pgd_ref))
 			continue;
 
 		spin_lock(&pgd_lock); /* Implies rcu_read_lock() for the task list iteration: */
@@ -204,13 +198,8 @@ void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 			if (!pgd_none(*pgd_ref) && !pgd_none(*pgd))
 				BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_ref));
 
-			if (removed) {
-				if (pgd_none(*pgd_ref) && !pgd_none(*pgd))
-					pgd_clear(pgd);
-			} else {
-				if (pgd_none(*pgd))
-					set_pgd(pgd, *pgd_ref);
-			}
+			if (pgd_none(*pgd))
+				set_pgd(pgd, *pgd_ref);
 
 			spin_unlock(pgt_lock);
 			task_unlock(p);
@@ -644,7 +633,7 @@ kernel_physical_mapping_init(unsigned long start,
 	}
 
 	if (pgd_changed)
-		sync_global_pgds(addr, end - 1, 0);
+		sync_global_pgds(addr, end - 1);
 
 	__flush_tlb_all();
 
@@ -1284,7 +1273,7 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 	else
 		err = vmemmap_populate_basepages(start, end, node);
 	if (!err)
-		sync_global_pgds(start, end - 1, 0);
+		sync_global_pgds(start, end - 1);
 	return err;
 }
 
