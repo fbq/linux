@@ -125,22 +125,6 @@ static void pgd_ctor(struct mm_struct *mm, pgd_t *pgd)
 				swapper_pg_dir + KERNEL_PGD_BOUNDARY,
 				KERNEL_PGD_PTRS);
 	}
-
-	/* list required to sync kernel mapping updates */
-	if (!SHARED_KERNEL_PMD) {
-		pgd_set_mm(pgd, mm);
-		pgd_list_add(pgd);
-	}
-}
-
-static void pgd_dtor(pgd_t *pgd)
-{
-	if (SHARED_KERNEL_PMD)
-		return;
-
-	spin_lock(&pgd_lock);
-	pgd_list_del(pgd);
-	spin_unlock(&pgd_lock);
 }
 
 /*
@@ -370,16 +354,12 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 		goto out_free_pmds;
 
 	/*
-	 * Make sure that pre-populating the pmds is atomic with
-	 * respect to anything walking the pgd_list, so that they
-	 * never see a partially populated pgd.
+	 * No locking is needed here, as the PGD is still private,
+	 * so no code walking the task list and looking at mm->pgd
+	 * will be able to see it before it's fully constructed:
 	 */
-	spin_lock(&pgd_lock);
-
 	pgd_ctor(mm, pgd);
 	pgd_prepopulate_pmd(mm, pgd, pmds);
-
-	spin_unlock(&pgd_lock);
 
 	return pgd;
 
@@ -453,7 +433,6 @@ void arch_pgd_init_late(struct mm_struct *mm)
 void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
 	pgd_mop_up_pmds(mm, pgd);
-	pgd_dtor(pgd);
 	paravirt_pgd_free(mm, pgd);
 	_pgd_free(pgd);
 }
