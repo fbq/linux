@@ -87,20 +87,6 @@ void ___pud_free_tlb(struct mmu_gather *tlb, pud_t *pud)
 #define UNSHARED_PTRS_PER_PGD				\
 	(SHARED_KERNEL_PMD ? KERNEL_PGD_BOUNDARY : PTRS_PER_PGD)
 
-static void pgd_ctor(struct mm_struct *mm, pgd_t *pgd)
-{
-	/* If the pgd points to a shared pagetable level (either the
-	   ptes in non-PAE, or shared PMD in PAE), then just copy the
-	   references from swapper_pg_dir. */
-	if (CONFIG_PGTABLE_LEVELS == 2 ||
-	    (CONFIG_PGTABLE_LEVELS == 3 && SHARED_KERNEL_PMD) ||
-	    CONFIG_PGTABLE_LEVELS == 4) {
-		clone_pgd_range(pgd + KERNEL_PGD_BOUNDARY,
-				swapper_pg_dir + KERNEL_PGD_BOUNDARY,
-				KERNEL_PGD_PTRS);
-	}
-}
-
 /*
  * List of all pgd's needed for non-PAE so it can invalidate entries
  * in both cached and uncached pgd's; not needed for PAE since the
@@ -328,11 +314,16 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 		goto out_free_pmds;
 
 	/*
-	 * No locking is needed here, as the PGD is still private,
-	 * so no code walking the task list and looking at mm->pgd
-	 * will be able to see it before it's fully constructed:
+	 * Zero out the kernel portion here, we'll set them up in
+	 * arch_pgd_init_late(), when the pgd is globally
+	 * visible already per the task list, so that it cannot
+	 * miss updates.
+	 *
+	 * We need to zero it here, to make sure arch_pgd_init_late()
+	 * can initialize them without locking.
 	 */
-	pgd_ctor(mm, pgd);
+	memset(pgd + KERNEL_PGD_BOUNDARY, 0, KERNEL_PGD_PTRS*sizeof(pgd_t));
+
 	pgd_prepopulate_pmd(mm, pgd, pmds);
 
 	return pgd;
