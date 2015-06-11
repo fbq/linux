@@ -33,6 +33,7 @@
 #include <linux/nmi.h>
 #include <linux/gfp.h>
 #include <linux/kcore.h>
+#include <linux/oom.h>
 
 #include <asm/processor.h>
 #include <asm/bios_ebda.h>
@@ -160,8 +161,8 @@ static int __init nonx32_setup(char *str)
 __setup("noexec32=", nonx32_setup);
 
 /*
- * When memory was added/removed make sure all the processes MM have
- * suitable PGD entries in the local PGD level page.
+ * When memory was added/removed make sure all the process MMs have
+ * matching PGD entries in the local PGD level page as well.
  */
 void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 {
@@ -169,29 +170,39 @@ void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 
 	for (address = start; address <= end; address += PGDIR_SIZE) {
 		const pgd_t *pgd_ref = pgd_offset_k(address);
-		struct page *page;
+		struct task_struct *g;
 
 		/*
-		 * When it is called after memory hot remove, pgd_none()
-		 * returns true. In this case (removed == 1), we must clear
-		 * the PGD entries in the local PGD level page.
+		 * When this function is called after memory hot remove,
+		 * pgd_none() already returns true, but only the reference
+		 * kernel PGD has been cleared, not the process PGDs.
+		 *
+		 * So clear the affected entries in every process PGD as well:
 		 */
 		if (pgd_none(*pgd_ref) && !removed)
 			continue;
 
-		spin_lock(&pgd_lock);
-		list_for_each_entry(page, &pgd_list, lru) {
+		spin_lock(&pgd_lock); /* Implies rcu_read_lock() for the task list iteration: */
+
+		for_each_process(g) {
+			struct task_struct *p;
+			struct mm_struct *mm;
 			pgd_t *pgd;
 			spinlock_t *pgt_lock;
 
-			pgd = (pgd_t *)page_address(page) + pgd_index(address);
-			/* the pgt_lock only for Xen */
-			pgt_lock = &pgd_page_get_mm(page)->page_table_lock;
+			p = find_lock_task_mm(g);
+			if (!p)
+				continue;
+
+			mm = p->mm;
+			pgd = mm->pgd;
+
+			/* The pgt_lock is only used by Xen: */
+			pgt_lock = &mm->page_table_lock;
 			spin_lock(pgt_lock);
 
 			if (!pgd_none(*pgd_ref) && !pgd_none(*pgd))
-				BUG_ON(pgd_page_vaddr(*pgd)
-				       != pgd_page_vaddr(*pgd_ref));
+				BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_ref));
 
 			if (removed) {
 				if (pgd_none(*pgd_ref) && !pgd_none(*pgd))
@@ -202,6 +213,7 @@ void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 			}
 
 			spin_unlock(pgt_lock);
+			task_unlock(p);
 		}
 		spin_unlock(&pgd_lock);
 	}
