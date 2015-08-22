@@ -276,7 +276,21 @@ EXPORT_SYMBOL(vmalloc_to_pfn);
 #define VM_LAZY_FREEING	0x02
 #define VM_VM_AREA	0x04
 
-static DEFINE_SPINLOCK(vmap_area_lock);
+static __cacheline_aligned_in_smp DEFINE_SPINLOCK(vmap_area_lock);
+
+#ifdef CONFIG_PROC_FS
+/*
+ * A seqlock and two generation counters for a simple cache of the
+ * vmalloc allocation statistics info printed in /proc/meminfo.
+ *
+ * ( The assumption of the optimization is that it's read frequently, but
+ *   modified infrequently. )
+ */
+static DEFINE_SPINLOCK(vmap_info_lock);
+static unsigned int vmap_info_gen = 1;
+static unsigned int vmap_info_cache_gen;
+static struct vmalloc_info vmap_info_cache;
+#endif
 
 static inline void vmap_lock(void)
 {
@@ -285,6 +299,9 @@ static inline void vmap_lock(void)
 
 static inline void vmap_unlock(void)
 {
+#ifdef CONFIG_PROC_FS
+	WRITE_ONCE(vmap_info_gen, vmap_info_gen+1);
+#endif
 	spin_unlock(&vmap_area_lock);
 }
 
@@ -2699,7 +2716,7 @@ static int __init proc_vmalloc_init(void)
 }
 module_init(proc_vmalloc_init);
 
-void get_vmalloc_info(struct vmalloc_info *vmi)
+static void calc_vmalloc_info(struct vmalloc_info *vmi)
 {
 	struct vmap_area *va;
 	unsigned long free_area_size;
@@ -2746,5 +2763,59 @@ void get_vmalloc_info(struct vmalloc_info *vmi)
 out:
 	rcu_read_unlock();
 }
-#endif
 
+/*
+ * Return a consistent snapshot of the current vmalloc allocation
+ * statistics, for /proc/meminfo:
+ */
+void get_vmalloc_info(struct vmalloc_info *vmi)
+{
+	unsigned int cache_gen, gen;
+
+	/*
+	 * The common case is that the cache is valid, so first
+	 * read it, then check its validity.
+	 *
+	 * The two read barriers make sure that we read
+	 * 'cache_gen', 'vmap_info_cache' and 'gen' in
+	 * precisely that order:
+	 */
+	cache_gen = vmap_info_cache_gen;
+	smp_rmb();
+	*vmi = vmap_info_cache;
+	smp_rmb();
+	gen = vmap_info_gen;
+
+	/*
+	 * If the generation counter of the cache matches that of
+	 * the vmalloc generation counter then return the cache:
+	 */
+	if (cache_gen == gen)
+		return;
+
+	/* Make sure 'gen' is read before the vmalloc info: */
+	smp_rmb();
+	calc_vmalloc_info(vmi);
+
+	/*
+	 * All updates to vmap_info_cache_gen go through this spinlock,
+	 * so when the cache got invalidated, we'll only mark it valid
+	 * again if we first fully write the new vmap_info_cache.
+	 *
+	 * This ensures that partial results won't be used and that the
+	 * vmalloc info belonging to the freshest update is used:
+	 */
+	spin_lock(&vmap_info_lock);
+	if ((int)(gen-vmap_info_cache_gen) > 0) {
+		vmap_info_cache = *vmi;
+		/*
+		 * Make sure the new cached data is visible before
+		 * the generation counter update:
+		 */
+		smp_wmb();
+		vmap_info_cache_gen = gen;
+	}
+	spin_unlock(&vmap_info_lock);
+}
+
+#endif /* CONFIG_PROC_FS */
