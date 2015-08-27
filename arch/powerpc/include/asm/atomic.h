@@ -45,6 +45,32 @@
 	__ret;								\
 })
 
+/*
+ * ppc_barrier_asm():
+ * generate atomic asm code that requires certain barriers
+ * @loop: "Load and Reserve" and "Store conditional" loop for atomic operations
+ * @out: instructions executed after atomic operation
+ * @entry_b: barrier before atomic loop
+ * @exit_b: barrier after atomic loop, may not execute if atomic loop fails in
+ *           the middle
+ */
+#define ppc_barrier_asm(loop, out, entry_b, exit_b, args...)		\
+({									\
+	__asm__ __volatile__(						\
+	entry_b							\
+	loop								\
+	exit_b								\
+	out								\
+	args);								\
+})
+
+#define PPC_NO_BARRIER "\n"
+#define ppc_barrier_asm_acquire(loop, out, args...)			\
+	ppc_barrier_asm(loop, out, PPC_NO_BARRIER, PPC_ACQUIRE_BARRIER, args)
+
+#define ppc_barrier_asm_release(loop, out, args...)			\
+	ppc_barrier_asm(loop, out, PPC_RELEASE_BARRIER, PPC_NO_BARRIER, args)
+
 static __inline__ int atomic_read(const atomic_t *v)
 {
 	int t;
@@ -192,6 +218,11 @@ static __inline__ int atomic_dec_return(atomic_t *v)
 }
 
 #define atomic_cmpxchg(v, o, n) (cmpxchg(&((v)->counter), (o), (n)))
+#define atomic_cmpxchg_relaxed(v, o, n) \
+	cmpxchg_relaxed(&((v)->counter), (o), (n))
+#define atomic_cmpxchg_acquire(v, o, n) \
+	cmpxchg_acquire(&((v)->counter), (o), (n))
+
 #define atomic_xchg(v, new) (xchg(&((v)->counter), new))
 #define atomic_xchg_relaxed(v, new) xchg_relaxed(&((v)->counter), (new))
 
@@ -462,6 +493,11 @@ static __inline__ long atomic64_dec_if_positive(atomic64_t *v)
 }
 
 #define atomic64_cmpxchg(v, o, n) (cmpxchg(&((v)->counter), (o), (n)))
+#define atomic64_cmpxchg_relaxed(v, o, n) \
+	cmpxchg_relaxed(&((v)->counter), (o), (n))
+#define atomic64_cmpxchg_acquire(v, o, n) \
+	cmpxchg_acquire(&((v)->counter), (o), (n))
+
 #define atomic64_xchg(v, new) (xchg(&((v)->counter), new))
 #define atomic64_xchg_relaxed(v, new) xchg_relaxed(&((v)->counter), (new))
 
