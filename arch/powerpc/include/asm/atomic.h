@@ -193,6 +193,7 @@ static __inline__ int atomic_dec_return(atomic_t *v)
 
 #define atomic_cmpxchg(v, o, n) (cmpxchg(&((v)->counter), (o), (n)))
 #define atomic_xchg(v, new) (xchg(&((v)->counter), new))
+#define atomic_xchg_relaxed(v, new) xchg_relaxed(&((v)->counter), (new))
 
 /**
  * __atomic_add_unless - add unless the number is a given value
@@ -462,6 +463,7 @@ static __inline__ long atomic64_dec_if_positive(atomic64_t *v)
 
 #define atomic64_cmpxchg(v, o, n) (cmpxchg(&((v)->counter), (o), (n)))
 #define atomic64_xchg(v, new) (xchg(&((v)->counter), new))
+#define atomic64_xchg_relaxed(v, new) xchg_relaxed(&((v)->counter), (new))
 
 /**
  * atomic64_add_unless - add unless the number is a given value

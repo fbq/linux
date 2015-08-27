@@ -54,6 +54,32 @@ __xchg_u32_local(volatile void *p, unsigned long val)
 	return prev;
 }
 
+/*
+ * Atomic exchange relaxed
+ *
+ * Changes the memory location '*p' to be val and returns
+ * the previous value stored there.
+ *
+ * Note that this is not a compiler barrier, there is no order
+ * guarantee around.
+ */
+static __always_inline unsigned long
+__xchg_u32_relaxed(u32 *p, unsigned long val)
+{
+	unsigned long prev;
+
+	__asm__ __volatile__(
+"1:	lwarx	%0,0,%2\n"
+	PPC405_ERR77(0, %2)
+"	stwcx.	%3,0,%2\n"
+"	bne-	1b"
+	: "=&r" (prev), "+m" (*p)
+	: "r" (p), "r" (val)
+	: "cc");
+
+	return prev;
+}
+
 #ifdef CONFIG_PPC64
 static __always_inline unsigned long
 __xchg_u64(volatile void *p, unsigned long val)
@@ -87,6 +113,23 @@ __xchg_u64_local(volatile void *p, unsigned long val)
 	: "=&r" (prev), "+m" (*(volatile unsigned long *)p)
 	: "r" (p), "r" (val)
 	: "cc", "memory");
+
+	return prev;
+}
+
+static __always_inline unsigned long
+__xchg_u64_relaxed(u64 *p, unsigned long val)
+{
+	unsigned long prev;
+
+	__asm__ __volatile__(
+"1:	ldarx	%0,0,%2\n"
+	PPC405_ERR77(0, %2)
+"	stdcx.	%3,0,%2\n"
+"	bne-	1b"
+	: "=&r" (prev), "+m" (*p)
+	: "r" (p), "r" (val)
+	: "cc");
 
 	return prev;
 }
@@ -127,6 +170,21 @@ __xchg_local(volatile void *ptr, unsigned long x, unsigned int size)
 	__xchg_called_with_bad_pointer();
 	return x;
 }
+
+static __always_inline unsigned long
+__xchg_relaxed(void *ptr, unsigned long x, unsigned int size)
+{
+	switch (size) {
+	case 4:
+		return __xchg_u32_relaxed(ptr, x);
+#ifdef CONFIG_PPC64
+	case 8:
+		return __xchg_u64_relaxed(ptr, x);
+#endif
+	}
+	__xchg_called_with_bad_pointer();
+	return x;
+}
 #define xchg(ptr,x)							     \
   ({									     \
      __typeof__(*(ptr)) _x_ = (x);					     \
@@ -140,6 +198,12 @@ __xchg_local(volatile void *ptr, unsigned long x, unsigned int size)
      		(unsigned long)_x_, sizeof(*(ptr))); 			     \
   })
 
+#define xchg_relaxed(ptr, x)						\
+({									\
+	__typeof__(*(ptr)) _x_ = (x);					\
+	(__typeof__(*(ptr))) __xchg_relaxed((ptr),			\
+			(unsigned long)_x_, sizeof(*(ptr)));		\
+})
 /*
  * Compare and exchange - if *p == old, set it to new,
  * and return the old value of *p.
