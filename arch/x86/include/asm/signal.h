@@ -34,7 +34,7 @@ extern void do_notify_resume(struct pt_regs *, void *, __u32);
 
 #define __ARCH_HAS_SA_RESTORER
 
-#include <asm/sigcontext.h>
+#include <uapi/asm/sigcontext.h>
 
 #ifdef __i386__
 

@@ -11,7 +11,7 @@ struct mm_struct;
 #include <asm/math_emu.h>
 #include <asm/segment.h>
 #include <asm/types.h>
-#include <asm/sigcontext.h>
+#include <uapi/asm/sigcontext.h>
 #include <asm/current.h>
 #include <asm/cpufeature.h>
 #include <asm/page.h>

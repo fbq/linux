@@ -3,6 +3,6 @@
 
 /* This is a legacy file - all the type definitions are in sigcontext.h: */
 
-#include <asm/sigcontext.h>
+#include <uapi/asm/sigcontext.h>
 
 #endif /* _ASM_X86_SIGCONTEXT32_H */
