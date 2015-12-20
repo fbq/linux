@@ -51,9 +51,26 @@ struct lockdep_subclass_key {
 	char __one_byte;
 } __attribute__ ((__packed__));
 
+#ifdef CONFIG_LOCKED_ACCESS
+struct locked_access_class;
+
 struct lock_class_key {
-	struct lockdep_subclass_key	subkeys[MAX_LOCKDEP_SUBCLASSES];
+	union {
+		struct lockdep_subclass_key subkeys[MAX_LOCKDEP_SUBCLASSES];
+		/*
+		 * Use the content of the lock_class_key to store locked access
+		 * class, as the content of lock_class_key is never used.
+		 * However, please note by doing so, we will change the align
+		 * requirement of lock_class_key
+		 */
+		struct locked_access_class *laclass;
+	};
 };
+#else
+struct lock_class_key {
+	struct lockdep_subclass_key subkeys[MAX_LOCKDEP_SUBCLASSES];
+};
+#endif
 
 extern struct lock_class_key __lockdep_no_validate__;
 
@@ -553,4 +570,33 @@ lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 }
 #endif
 
+#ifdef CONFIG_LOCKED_ACCESS
+struct locked_access_location {
+	/* filename of the access */
+	const char			*filename;
+	/* line number of the access */
+	long				lineno;
+};
+
+#define LOCKED_ACCESS_TYPE_READ		1 /* read */
+
+extern void locked_access(struct locked_access_class *laclass,
+			  struct locked_access_location *access,
+			  int type);
+
+/*
+ * Entry point of LOCKED_ACCESS, should be called at every place the data
+ * accesses of the particular laclass happen.
+ *
+ * @_type must be one of the LOCKED_ACCESS_TYPE_*
+ */
+#define locked_access_point(_laclass, _type) \
+({ \
+	static struct locked_access_location a = { \
+				.filename = __FILE__, \
+				.lineno = __LINE__, \
+	}; \
+	locked_access(_laclass, &a, _type); \
+})
+#endif /* CONFIG_LOCKED_ACCESS */
 #endif /* __LINUX_LOCKDEP_H */

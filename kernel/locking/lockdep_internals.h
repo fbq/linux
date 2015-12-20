@@ -170,8 +170,91 @@ DECLARE_PER_CPU(struct lockdep_stats, lockdep_stats);
 #endif
 
 #ifdef CONFIG_LOCKED_ACCESS
+/*
+ * a chain of lock acquisitions, identify by a hash value of all the
+ * instruction positions of lock acquisitions
+ */
+struct acqchain {
+	u8				irq_context;
+	s8				depth;
+	s16				base;
+	struct list_head		entry;
+	u64				chain_key;
+	struct list_head		accesses;
+};
+
 #define iterate_acqchain_key(key, ip) \
 	(((key) << MAX_LOCKDEP_KEYS_BITS) ^ \
 	((key) >> (64 - MAX_LOCKDEP_KEYS_BITS)) ^ \
 	(ip))
+
+#define MAX_ACQCHAINS_BITS	16
+#define MAX_ACQCHAINS		(1UL << MAX_ACQCHAINS_BITS)
+#define MAX_ACQCHAIN_HLOCKS	(MAX_ACQCHAINS * 5)
+
+#define ACQCHAIN_HASH_BITS	(MAX_ACQCHAINS_BITS-1)
+#define ACQCHAIN_HASH_SIZE	(1UL << ACQCHAIN_HASH_BITS)
+#define __acqchainhashfn(chain)	hash_long(chain, ACQCHAIN_HASH_BITS)
+#define acqchainhashentry(lad, chain) \
+	(lad->acqchain_hashtable + __acqchainhashfn((chain)))
+
+#define MAX_LOCKED_ACCESS_STRUCTS	(1UL << 16)
+
+struct locked_access_struct {
+	struct list_head		list;
+	struct locked_access_location	*loc;
+	int				type;
+};
+
+/*
+ * locked_access_class represent a group of critical sections and data accesses
+ * in it. Locked access class should be only defined statically, and the
+ * address of a locked_access_class is used as the 'key' of a locked access
+ * class.
+ *
+ * Data used to record relationship between a chain of lock acquisitions with
+ * a group of data accesses:
+ *     array of acqchains
+ *     array of acqchain_hlocks
+ *
+ */
+struct locked_access_class {
+	const char                   *name;
+	long                         nr_acqchains;
+	long                         nr_acqchain_hlocks;
+	struct list_head             acqchain_hashtable[ACQCHAIN_HASH_SIZE];
+	struct acqchain	             acqchains[MAX_ACQCHAINS];
+	unsigned long                acqchain_hlocks[MAX_ACQCHAIN_HLOCKS];
+	struct locked_access_struct  access_structs[MAX_LOCKED_ACCESS_STRUCTS];
+	long                         nr_access_structs;
+	arch_spinlock_t              lock;
+	int                          initialized;
+};
+
+#define INIT_LOCKED_ACCESS_DATA(_name) \
+	{ \
+		.name = #_name, \
+		.lock = __ARCH_SPIN_LOCK_UNLOCKED, \
+		.initialized = 0, \
+		.nr_acqchains = 0, \
+		.nr_acqchain_hlocks = 0,\
+		.nr_access_structs = 0, \
+	}
+
+extern int create_laclass_proc(const char *name,
+			   struct locked_access_class *laclass);
+
+#define DEFINE_CREATE_LACLASS_PROC(name) \
+static int __init ___create_##name##_laclass_proc(void) \
+{ \
+	return create_laclass_proc(#name, &name##_laclass); \
+} \
+late_initcall(___create_##name##_laclass_proc)
+
+/* Define a Locked Access Class and create its proc file */
+#define DEFINE_LACLASS(name) \
+	struct locked_access_class name##_laclass = \
+			INIT_LOCKED_ACCESS_DATA(name); \
+	EXPORT_SYMBOL(name##_laclass); \
+	DEFINE_CREATE_LACLASS_PROC(name)
 #endif /* CONFIG_LOCKED_ACCESS */
