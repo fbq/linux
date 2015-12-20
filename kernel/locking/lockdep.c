@@ -4616,5 +4616,6 @@ void locked_access(struct locked_access_class *laclass,
 		correlate_locked_access(laclass, acqchain, loc, type);
 }
 EXPORT_SYMBOL(locked_access);
+DEFINE_LACLASS(rcu);
 
 #endif /* CONFIG_LOCKED_ACCESS */
