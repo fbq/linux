@@ -168,3 +168,10 @@ DECLARE_PER_CPU(struct lockdep_stats, lockdep_stats);
 # define debug_atomic_dec(ptr)		do { } while (0)
 # define debug_atomic_read(ptr)		0
 #endif
+
+#ifdef CONFIG_LOCKED_ACCESS
+#define iterate_acqchain_key(key, ip) \
+	(((key) << MAX_LOCKDEP_KEYS_BITS) ^ \
+	((key) >> (64 - MAX_LOCKDEP_KEYS_BITS)) ^ \
+	(ip))
+#endif /* CONFIG_LOCKED_ACCESS */

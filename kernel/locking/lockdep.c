@@ -3077,6 +3077,9 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	int chain_head = 0;
 	int class_idx;
 	u64 chain_key;
+#ifdef CONFIG_LOCKED_ACCESS
+	u64 acqchain_key;
+#endif
 
 	if (unlikely(!debug_locks))
 		return 0;
@@ -3184,6 +3187,9 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 		return 0;
 
 	chain_key = curr->curr_chain_key;
+#ifdef CONFIG_LOCKED_ACCESS
+	acqchain_key = curr->curr_acqchain_key;
+#endif
 	if (!depth) {
 		/*
 		 * How can we have a chain hash when we ain't got no keys?!
@@ -3194,12 +3200,23 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	}
 
 	hlock->prev_chain_key = chain_key;
+#ifdef CONFIG_LOCKED_ACCESS
+	hlock->prev_acqchain_key = acqchain_key;
+#endif
 	if (separate_irq_context(curr, hlock)) {
 		chain_key = 0;
+
+#ifdef CONFIG_LOCKED_ACCESS
+		acqchain_key = 0;
+#endif
+
 		chain_head = 1;
 	}
 	chain_key = iterate_chain_key(chain_key, id);
 
+#ifdef CONFIG_LOCKED_ACCESS
+	acqchain_key = iterate_acqchain_key(acqchain_key, ip);
+#endif
 	if (nest_lock && !__lock_is_held(nest_lock))
 		return print_lock_nested_lock_not_held(curr, hlock, ip);
 
@@ -3207,6 +3224,9 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 		return 0;
 
 	curr->curr_chain_key = chain_key;
+#ifdef CONFIG_LOCKED_ACCESS
+	curr->curr_acqchain_key = acqchain_key;
+#endif
 	curr->lockdep_depth++;
 	check_chain_key(curr);
 #ifdef CONFIG_DEBUG_LOCKDEP
@@ -3336,6 +3356,9 @@ found_it:
 
 	curr->lockdep_depth = i;
 	curr->curr_chain_key = hlock->prev_chain_key;
+#ifdef CONFIG_LOCKED_ACCESS
+	curr->curr_acqchain_key = hlock->prev_acqchain_key;
+#endif
 
 	for (; i < depth; i++) {
 		hlock = curr->held_locks + i;
@@ -3426,6 +3449,9 @@ found_it:
 
 	curr->lockdep_depth = i;
 	curr->curr_chain_key = hlock->prev_chain_key;
+#ifdef CONFIG_LOCKED_ACCESS
+	curr->curr_acqchain_key = hlock->prev_acqchain_key;
+#endif
 
 	for (i++; i < depth; i++) {
 		hlock = curr->held_locks + i;
@@ -3867,6 +3893,11 @@ void lockdep_reset(void)
 
 	raw_local_irq_save(flags);
 	current->curr_chain_key = 0;
+
+#ifdef CONFIG_LOCKED_ACCESS
+	current->curr_acqchain_key = 0;
+#endif
+
 	current->lockdep_depth = 0;
 	current->lockdep_recursion = 0;
 	memset(current->held_locks, 0, MAX_LOCK_DEPTH*sizeof(struct held_lock));
