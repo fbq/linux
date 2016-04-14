@@ -64,6 +64,25 @@ static inline int arch_spin_is_locked(arch_spinlock_t *lock)
 }
 
 /*
+ * Use a ll/sc loop to read the lock value, the STORE part of this operation is
+ * used for making later lock operation observe it.
+ */
+static inline bool arch_spin_is_locked_sync(arch_spinlock_t *lock)
+{
+	arch_spinlock_t tmp;
+
+	__asm__ __volatile__(
+"1:	" PPC_LWARX(%0, 0, %2, 1) "\n"
+"	stwcx. %0, 0, %2\n"
+"	bne- 1b\n"
+	: "=&r" (tmp), "+m" (*lock)
+	: "r" (lock)
+	: "cr0", "xer");
+
+	return !arch_spin_value_unlocked(tmp);
+}
+
+/*
  * This returns the old value in the lock, so we succeeded
  * in getting the lock if the return value is 0.
  */
@@ -162,12 +181,23 @@ static inline void arch_spin_unlock(arch_spinlock_t *lock)
 	lock->slock = 0;
 }
 
-#ifdef CONFIG_PPC64
-extern void arch_spin_unlock_wait(arch_spinlock_t *lock);
-#else
-#define arch_spin_unlock_wait(lock) \
-	do { while (arch_spin_is_locked(lock)) cpu_relax(); } while (0)
-#endif
+static inline void arch_spin_unlock_wait(arch_spinlock_t *lock)
+{
+	smp_mb();
+
+	if (!arch_spin_is_locked_sync(lock))
+		goto out;
+
+	while (!arch_spin_value_unlocked(*lock)) {
+		HMT_low();
+		if (SHARED_PROCESSOR)
+			__spin_yield(lock);
+	}
+	HMT_medium();
+
+out:
+	smp_mb();
+}
 
 /*
  * Read-write spinlocks, allowing multiple readers
