@@ -1,6 +1,7 @@
 #include <linux/percpu.h>
 #include <linux/sched.h>
 #include <linux/osq_lock.h>
+#include <linux/vcpu_preempt.h>
 
 /*
  * An MCS like lock especially tailored for optimistic spinning for sleeping
@@ -87,6 +88,8 @@ bool osq_lock(struct optimistic_spin_queue *lock)
 	struct optimistic_spin_node *prev, *next;
 	int curr = encode_cpu(smp_processor_id());
 	int old;
+	int loops;
+	long vpc;
 
 	node->locked = 0;
 	node->next = NULL;
@@ -106,6 +109,9 @@ bool osq_lock(struct optimistic_spin_queue *lock)
 	node->prev = prev;
 	WRITE_ONCE(prev->next, node);
 
+	old = old - 1;
+	vpc = vcpu_preempt_count();
+
 	/*
 	 * Normally @prev is untouchable after the above store; because at that
 	 * moment unlock can proceed and wipe the node element from stack.
@@ -118,8 +124,14 @@ bool osq_lock(struct optimistic_spin_queue *lock)
 	while (!READ_ONCE(node->locked)) {
 		/*
 		 * If we need to reschedule bail... so we can block.
+		 * An over-committed guest with more vCPUs than pCPUs
+		 * might fall in this loop and cause a huge overload.
+		 * This is because vCPU A(prev) hold the osq lock and yield out,
+		 * vCPU B(node) wait ->locked to be set, IOW, wait till
+		 * vCPU A run and unlock the osq lock.
+		 * NOTE that vCPU A and vCPU B might run on same physical cpu.
 		 */
-		if (need_resched())
+		if (need_resched() || vcpu_is_preempted(old) || vcpu_has_preempted(vpc))
 			goto unqueue;
 
 		cpu_relax_lowlatency();
