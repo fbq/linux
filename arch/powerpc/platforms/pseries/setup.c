@@ -42,6 +42,7 @@
 #include <linux/of.h>
 #include <linux/of_pci.h>
 #include <linux/kexec.h>
+#include <linux/vcpu_preempt.h>
 
 #include <asm/mmu.h>
 #include <asm/processor.h>
@@ -501,6 +502,31 @@ static void __init find_and_init_phbs(void)
 	of_pci_check_probe_only();
 }
 
+struct vcpu_preempt_ops vcpu_preempt_ops = DEFAULT_VCPU_PREEMPT_OPS;
+EXPORT_SYMBOL(vcpu_preempt_ops);
+
+static long pseries_vcpu_preempt_count(void)
+{
+	return be32_to_cpu(get_lppaca()->yield_count);
+}
+
+static bool pseries_vcpu_is_preempted(int cpu)
+{
+	return !!(be32_to_cpu(lppaca_of(cpu).yield_count) & 1);
+}
+
+static bool pseries_vcpu_has_preempted(long vpc)
+{
+	return pseries_vcpu_preempt_count() != vpc;
+}
+
+static void __init pseries_setup_vcpu_preempt_ops(void)
+{
+	vcpu_preempt_ops.preempt_count = pseries_vcpu_preempt_count;
+	vcpu_preempt_ops.is_preempted = pseries_vcpu_is_preempted;
+	vcpu_preempt_ops.has_preempted = pseries_vcpu_has_preempted;
+}
+
 static void __init pSeries_setup_arch(void)
 {
 	set_arch_panic_timeout(10, ARCH_PANIC_TIMEOUT);
@@ -549,6 +575,8 @@ static void __init pSeries_setup_arch(void)
 				"%ld\n", rc);
 		}
 	}
+
+	pseries_setup_vcpu_preempt_ops();
 }
 
 static int __init pSeries_init_panel(void)

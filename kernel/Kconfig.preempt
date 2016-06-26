@@ -56,3 +56,6 @@ endchoice
 
 config PREEMPT_COUNT
        bool
+
+config HAS_VCPU_PREEMPTION_DETECTION
+       bool

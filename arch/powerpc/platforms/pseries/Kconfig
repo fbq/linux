@@ -21,6 +21,7 @@ config PPC_PSERIES
 	select HOTPLUG_CPU if SMP
 	select ARCH_RANDOM
 	select PPC_DOORBELL
+	select HAS_VCPU_PREEMPTION_DETECTION
 	default y
 
 config PPC_SPLPAR
