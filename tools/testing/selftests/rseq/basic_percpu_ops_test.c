@@ -51,7 +51,7 @@ int rseq_percpu_lock(struct percpu_lock *lock)
 	bool result;
 
 	for (;;) {
-		do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+		do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 			{
 				if (unlikely(lock->c[cpu].v)) {
 					result = false;
@@ -137,7 +137,7 @@ int percpu_list_push(struct percpu_list *list, struct percpu_list_node *node)
 	int cpu;
 	bool result;
 
-	do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+	do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 		{
 			newval = (intptr_t)node;
 			targetptr = (intptr_t *)&list->c[cpu].head;
@@ -160,7 +160,7 @@ struct percpu_list_node *percpu_list_pop(struct percpu_list *list)
 	int cpu;
 	bool result;
 
-	do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+	do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 		{
 			head = list->c[cpu].head;
 			if (!head) {

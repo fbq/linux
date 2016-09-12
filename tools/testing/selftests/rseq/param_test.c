@@ -218,7 +218,7 @@ static int rseq_percpu_lock(struct percpu_lock *lock)
 	bool result;
 
 	for (;;) {
-		do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+		do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 			{
 				if (unlikely(lock->c[cpu].v)) {
 					result = false;
@@ -338,7 +338,7 @@ void *test_percpu_inc_thread(void *arg)
 		int cpu;
 		bool result;
 
-		do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+		do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 			{
 				newval = (intptr_t)data->c[cpu].count + 1;
 				targetptr = (intptr_t *)&data->c[cpu].count;
@@ -407,7 +407,7 @@ int percpu_list_push(struct percpu_list *list, struct percpu_list_node *node)
 	int cpu;
 	bool result;
 
-	do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+	do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 		{
 			newval = (intptr_t)node;
 			targetptr = (intptr_t *)&list->c[cpu].head;
@@ -430,7 +430,7 @@ struct percpu_list_node *percpu_list_pop(struct percpu_list *list)
 	int cpu;
 	bool result;
 
-	do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+	do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 		{
 			head = list->c[cpu].head;
 			if (!head) {
@@ -551,7 +551,7 @@ bool percpu_buffer_push(struct percpu_buffer *buffer,
 	int cpu;
 	bool result;
 
-	do_rseq2(&rseq_lock, rseq_state, cpu, result,
+	do_rseq2(&rseq_lock, &rseq_state, cpu, result,
 		targetptr_spec, newval_spec, targetptr_final, newval_final,
 		{
 			intptr_t offset = buffer->c[cpu].offset;
@@ -577,7 +577,7 @@ struct percpu_buffer_node *percpu_buffer_pop(struct percpu_buffer *buffer)
 	int cpu;
 	bool result;
 
-	do_rseq(&rseq_lock, rseq_state, cpu, result, targetptr, newval,
+	do_rseq(&rseq_lock, &rseq_state, cpu, result, targetptr, newval,
 		{
 			intptr_t offset = buffer->c[cpu].offset;
 
@@ -721,7 +721,7 @@ bool percpu_memcpy_buffer_push(struct percpu_memcpy_buffer *buffer,
 	int cpu;
 	bool result;
 
-	do_rseq_memcpy(&rseq_lock, rseq_state, cpu, result,
+	do_rseq_memcpy(&rseq_lock, &rseq_state, cpu, result,
 		destptr, srcptr, copylen, targetptr_final, newval_final,
 		{
 			intptr_t offset = buffer->c[cpu].offset;
@@ -750,7 +750,7 @@ bool percpu_memcpy_buffer_pop(struct percpu_memcpy_buffer *buffer,
 	int cpu;
 	bool result;
 
-	do_rseq_memcpy(&rseq_lock, rseq_state, cpu, result,
+	do_rseq_memcpy(&rseq_lock, &rseq_state, cpu, result,
 		destptr, srcptr, copylen, targetptr_final, newval_final,
 		{
 			intptr_t offset = buffer->c[cpu].offset;

@@ -84,9 +84,9 @@ do { \
 		"jmp %l[failure]\n\t" \
 		".popsection\n\t" \
 		: /* gcc asm goto does not allow outputs */ \
-		: [start_event_counter]"r"((_start_value).event_counter), \
-		  [current_event_counter]"m"((_start_value).rseqp->u.e.event_counter), \
-		  [rseq_cs]"m"((_start_value).rseqp->rseq_cs) \
+		: [start_event_counter]"r"((_start_value)->event_counter), \
+		  [current_event_counter]"m"((_start_value)->rseqp->u.e.event_counter), \
+		  [rseq_cs]"m"((_start_value)->rseqp->rseq_cs) \
 		  _spec_input \
 		  _final_input \
 		  RSEQ_INJECT_INPUT \
@@ -228,9 +228,9 @@ do { \
 		"jmp %l[failure]\n\t" \
 		".popsection\n\t" \
 		: /* gcc asm goto does not allow outputs */ \
-		: [start_event_counter]"m"((_start_value).event_counter), \
-		  [current_event_counter]"m"((_start_value).rseqp->u.e.event_counter), \
-		  [rseq_cs]"m"((_start_value).rseqp->rseq_cs) \
+		: [start_event_counter]"m"((_start_value)->event_counter), \
+		  [current_event_counter]"m"((_start_value)->rseqp->u.e.event_counter), \
+		  [rseq_cs]"m"((_start_value)->rseqp->rseq_cs) \
 		  _spec_input \
 		  _final_input \
 		  RSEQ_INJECT_INPUT \
