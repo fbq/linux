@@ -102,7 +102,6 @@ struct rseq_lock {
 
 /* State returned by rseq_start, passed as argument to rseq_finish. */
 struct rseq_state {
-	volatile struct rseq *rseqp;
 	int32_t cpu_id;		/* cpu_id at start. */
 	uint32_t event_counter;	/* event_counter at start. */
 	int32_t lock_state;	/* Lock state at start. */
@@ -172,19 +171,18 @@ static inline int32_t rseq_current_cpu(void)
 static inline __attribute__((always_inline))
 void rseq_start(struct rseq_lock *rlock, struct rseq_state *result)
 {
-	result->rseqp = &__rseq_abi;
 	if (has_single_copy_load_64()) {
 		union rseq_cpu_event u;
 
-		u.v = ACCESS_ONCE(result->rseqp->u.v);
+		u.v = ACCESS_ONCE(__rseq_abi.u.v);
 		result->event_counter = u.e.event_counter;
 		result->cpu_id = u.e.cpu_id;
 	} else {
 		result->event_counter =
-			ACCESS_ONCE(result->rseqp->u.e.event_counter);
+			ACCESS_ONCE(__rseq_abi.u.e.event_counter);
 		/* load event_counter before cpu_id. */
 		RSEQ_INJECT_C(6)
-		result->cpu_id = ACCESS_ONCE(result->rseqp->u.e.cpu_id);
+		result->cpu_id = ACCESS_ONCE(__rseq_abi.u.e.cpu_id);
 	}
 	/*
 	 * Read event counter before lock state and cpu_id. This ensures
