@@ -102,7 +102,6 @@ struct rseq_lock {
 
 /* State returned by rseq_start, passed as argument to rseq_finish. */
 struct rseq_state {
-	int32_t cpu_id;		/* cpu_id at start. */
 	uint32_t event_counter;	/* event_counter at start. */
 	int32_t lock_state;	/* Lock state at start. */
 };
@@ -148,11 +147,6 @@ void rseq_fallback_noinit(struct rseq_state *rseq_state);
  */
 int rseq_fallback_current_cpu(void);
 
-static inline int32_t rseq_cpu_at_start(struct rseq_state *start_value)
-{
-	return start_value->cpu_id;
-}
-
 static inline int32_t rseq_current_cpu_raw(void)
 {
 	return ACCESS_ONCE(__rseq_abi.u.e.cpu_id);
@@ -169,20 +163,22 @@ static inline int32_t rseq_current_cpu(void)
 }
 
 static inline __attribute__((always_inline))
-void rseq_start(struct rseq_lock *rlock, struct rseq_state *result)
+int32_t rseq_start(struct rseq_lock *rlock, struct rseq_state *result)
 {
+	int32_t cpu_id;
+
 	if (has_single_copy_load_64()) {
 		union rseq_cpu_event u;
 
 		u.v = ACCESS_ONCE(__rseq_abi.u.v);
 		result->event_counter = u.e.event_counter;
-		result->cpu_id = u.e.cpu_id;
+		cpu_id = u.e.cpu_id;
 	} else {
 		result->event_counter =
 			ACCESS_ONCE(__rseq_abi.u.e.event_counter);
 		/* load event_counter before cpu_id. */
 		RSEQ_INJECT_C(6)
-		result->cpu_id = ACCESS_ONCE(__rseq_abi.u.e.cpu_id);
+		cpu_id = ACCESS_ONCE(__rseq_abi.u.e.cpu_id);
 	}
 	/*
 	 * Read event counter before lock state and cpu_id. This ensures
@@ -205,14 +201,16 @@ void rseq_start(struct rseq_lock *rlock, struct rseq_state *result)
 		 */
 		result->lock_state = smp_load_acquire(&rlock->state);
 	}
-	if (unlikely(result->cpu_id < 0))
+	if (unlikely(cpu_id < 0)) {
 		rseq_fallback_noinit(result);
+		cpu_id = 0;
+	}
 	/*
 	 * Ensure the compiler does not re-order loads of protected
 	 * values before we load the event counter.
 	 */
 	barrier();
-	return;
+	return cpu_id;
 }
 
 enum rseq_finish_type {
@@ -398,8 +396,7 @@ bool rseq_finish_memcpy_release(struct rseq_lock *rlock,
 		_dest_memcpy, _src_memcpy, _len_memcpy,			\
 		_targetptr_final, _newval_final, _code, _release)	\
 	do {								\
-		rseq_start(_lock, _rseq_state);				\
-		_cpu = rseq_cpu_at_start(_rseq_state);			\
+		_cpu = rseq_start(_lock, _rseq_state);				\
 		_result = true;						\
 		_code							\
 		if (unlikely(!_result))					\
@@ -410,8 +407,7 @@ bool rseq_finish_memcpy_release(struct rseq_lock *rlock,
 				_targetptr_final, _newval_final,	\
 				_rseq_state, _type, _release)))		\
 			break;						\
-		rseq_start(_lock, _rseq_state);				\
-		_cpu = rseq_cpu_at_start(_rseq_state);			\
+		_cpu = rseq_start(_lock, _rseq_state);				\
 		_result = true;						\
 		_code							\
 		if (unlikely(!_result))					\

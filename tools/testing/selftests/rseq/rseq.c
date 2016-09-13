@@ -224,7 +224,6 @@ void rseq_fallback_end(struct rseq_lock *rlock, int cpu)
 void rseq_fallback_noinit(struct rseq_state *rseq_state)
 {
 	rseq_state->lock_state = RSEQ_LOCK_STATE_FAIL;
-	rseq_state->cpu_id = 0;
 }
 
 uint32_t rseq_get_fallback_wait_cnt(void)
