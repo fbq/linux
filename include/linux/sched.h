@@ -1523,6 +1523,10 @@ struct task_struct {
 	int nr_cpus_allowed;
 	cpumask_t cpus_allowed;
 
+#ifdef CONFIG_RCU_USE_AFTER_FREE
+	const void *rcu_deref_ptr;
+	unsigned long rcu_deref_seq;
+#endif /* CONFIG_RCU_USE_AFTER_FREE */
 #ifdef CONFIG_PREEMPT_RCU
 	int rcu_read_lock_nesting;
 	union rcu_special rcu_read_unlock_special;

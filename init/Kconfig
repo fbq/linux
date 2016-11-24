@@ -794,6 +794,13 @@ config RCU_EXPEDITE_BOOT
 
 	  Accept the default if unsure.
 
+config RCU_USE_AFTER_FREE
+	bool "DEBUG use-after-free for RCU users"
+	default n
+	depends on RCU_EXPERT
+	help
+	  Help to debug use-after-free problem in RCU users
+
 endmenu # "RCU Subsystem"
 
 config BUILD_BIN2C

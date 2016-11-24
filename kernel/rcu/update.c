@@ -896,3 +896,85 @@ late_initcall(rcu_verify_early_boot_tests);
 #else
 void rcu_early_boot_tests(void) {}
 #endif /* CONFIG_PROVE_RCU */
+
+#ifdef CONFIG_RCU_USE_AFTER_FREE
+#define RCU_SEQ_HASH_BITS 10 /* 1K entries */
+#define RCU_SEQ_HASH_SIZE (1 << RCU_SEQ_HASH_BITS)
+struct rcu_seq_hash_entry {
+	const void __rcu *ptr;
+	unsigned long seq;
+	spinlock_t lock;
+};
+
+struct rcu_seq_hash_entry rcu_seq_hash[RCU_SEQ_HASH_SIZE];
+
+static unsigned long rcu_lookup_seq(const void *p)
+{
+	struct rcu_seq_hash_entry *entry;
+	unsigned long idx;
+
+	idx = hash_long((unsigned long)p, RCU_SEQ_HASH_BITS);
+
+	entry = &rcu_seq_hash[idx];
+
+	if (smp_load_acquire(&entry->ptr) == p)
+		return entry->seq;
+	else
+		return ULONG_MAX;
+}
+
+void rcu_record_deref_seq(const void *p)
+{
+	current->rcu_deref_ptr = p;
+	smp_rmb();
+	current->rcu_deref_seq = rcu_lookup_seq(p);
+}
+EXPORT_SYMBOL(rcu_record_deref_seq);
+
+/*
+ * Must called without race
+ */
+void rcu_inc_seq(const void *p)
+{
+	struct rcu_seq_hash_entry *entry;
+	unsigned long idx, flags;
+
+	idx = hash_long((unsigned long)p, RCU_SEQ_HASH_BITS);
+
+
+	entry = &rcu_seq_hash[idx];
+
+	spin_lock_irqsave(&entry->lock, flags);
+	if (entry->ptr == p)
+		entry->seq++;
+	else {
+		entry->seq = ULONG_MAX;
+		smp_store_release(&entry->ptr, p);
+	}
+	spin_unlock_irqrestore(&entry->lock, flags);
+}
+EXPORT_SYMBOL(rcu_inc_seq);
+
+bool rcu_release_deref(const void *p, unsigned long seq)
+{
+	unsigned long curr_seq = rcu_lookup_seq(p);
+
+	if (curr_seq != ULONG_MAX && seq != ULONG_MAX && curr_seq != seq)
+		return false;
+
+	return true;
+}
+
+EXPORT_SYMBOL(rcu_release_deref);
+
+void rcu_check_deref_seq(void)
+{
+	BUG_ON(!rcu_release_deref(current->rcu_deref_ptr,
+				  current->rcu_deref_seq));
+
+	current->rcu_deref_ptr = NULL;
+	current->rcu_deref_seq = ULONG_MAX;
+}
+EXPORT_SYMBOL(rcu_check_deref_seq);
+
+#endif /* CONFIG_RCU_USE_AFTER_FREE */

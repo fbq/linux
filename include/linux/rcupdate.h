@@ -578,6 +578,28 @@ static inline void rcu_preempt_sleep_check(void)
 
 #endif /* #else #ifdef CONFIG_PROVE_RCU */
 
+#ifdef CONFIG_RCU_USE_AFTER_FREE
+extern void rcu_inc_seq(const void *p);
+extern void rcu_record_deref_seq(const void *p);
+extern bool rcu_release_deref(const void *p, unsigned long seq);
+extern void rcu_check_deref_seq(void);
+
+#define rcu_alloc(alloc_func, ...) \
+({ \
+	void *___________p = alloc_func(__VA_ARGS__); \
+	rcu_inc_seq(___________p); \
+	___________p; \
+})
+
+#else /* CONFIG_RCU_USE_AFTER_FREE */
+# define rcu_record_deref_seq(p)
+# define rcu_check_deref_seq()
+# define rcu_alloc(alloc_fun, ...)	alloc_func(__VA_ARGS__)
+# define rcu_release_deref(p, seq)
+# define rcu_check_deref_seq()
+#endif /* CONFIG_RCU_USE_AFTER_FREE */
+
+
 /*
  * Helper functions for rcu_dereference_check(), rcu_dereference_protected()
  * and rcu_assign_pointer().  Some of these could be folded into their
@@ -605,6 +627,7 @@ static inline void rcu_preempt_sleep_check(void)
 	/* Dependency order vs. p above. */ \
 	typeof(*p) *________p1 = (typeof(*p) *__force)lockless_dereference(p); \
 	RCU_LOCKDEP_WARN(!(c), "suspicious rcu_dereference_check() usage"); \
+	rcu_record_deref_seq(p); \
 	rcu_dereference_sparse(p, space); \
 	((typeof(*p) __force __kernel *)(________p1)); \
 })

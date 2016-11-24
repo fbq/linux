@@ -390,6 +390,7 @@ void rcu_read_unlock_special(struct task_struct *t)
 	if (in_nmi())
 		return;
 
+	rcu_check_deref_seq();
 	local_irq_save(flags);
 
 	/*
