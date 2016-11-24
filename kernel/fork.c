@@ -477,7 +477,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 
 	if (node == NUMA_NO_NODE)
 		node = tsk_fork_get_node(orig);
-	tsk = alloc_task_struct_node(node);
+	tsk = rcu_alloc(alloc_task_struct_node, node);
 	if (!tsk)
 		return NULL;
 
