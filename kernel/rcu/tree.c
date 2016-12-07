@@ -1407,10 +1407,9 @@ static void rcu_dump_cpu_stacks(struct rcu_state *rsp)
 
 	rcu_for_each_leaf_node(rsp, rnp) {
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);
-		for_each_leaf_node_possible_cpu(rnp, cpu)
-			if (rnp->qsmask & leaf_node_cpu_bit(rnp, cpu))
-				if (!trigger_single_cpu_backtrace(cpu))
-					dump_cpu_task(cpu);
+		for_each_leaf_node_cpu(rnp, rnp->qsmask, cpu)
+			if (!trigger_single_cpu_backtrace(cpu))
+				dump_cpu_task(cpu);
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 	}
 }
@@ -1480,12 +1479,9 @@ static void print_other_cpu_stall(struct rcu_state *rsp, unsigned long gpnum)
 	rcu_for_each_leaf_node(rsp, rnp) {
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);
 		ndetected += rcu_print_task_stall(rnp);
-		if (rnp->qsmask != 0) {
-			for_each_leaf_node_possible_cpu(rnp, cpu)
-				if (rnp->qsmask & leaf_node_cpu_bit(rnp, cpu)) {
-					print_cpu_stall_info(rsp, cpu);
-					ndetected++;
-				}
+		for_each_leaf_node_cpu(rnp, rnp->qsmask, cpu) {
+			print_cpu_stall_info(rsp, cpu);
+			ndetected++;
 		}
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 	}
@@ -2922,13 +2918,9 @@ static void force_qs_rnp(struct rcu_state *rsp,
 				continue;
 			}
 		}
-		for_each_leaf_node_possible_cpu(rnp, cpu) {
-			unsigned long bit = leaf_node_cpu_bit(rnp, cpu);
-			if ((rnp->qsmask & bit) != 0) {
-				if (f(per_cpu_ptr(rsp->rda, cpu), isidle, maxj))
-					mask |= bit;
-			}
-		}
+		for_each_leaf_node_cpu(rnp, rnp->qsmask, cpu)
+			if (f(per_cpu_ptr(rsp->rda, cpu), isidle, maxj))
+				mask |= leaf_node_cpu_bit(rnp, cpu);
 		if (mask != 0) {
 			/* Idle/offline CPUs, report (releases rnp->lock. */
 			rcu_report_qs_rnp(mask, rsp, rnp, rnp->gpnum, flags);

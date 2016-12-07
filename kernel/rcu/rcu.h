@@ -291,6 +291,27 @@ static inline void rcu_init_levelspread(int *levelspread, const int *levelcnt)
 	     cpu <= rnp->grphi; \
 	     cpu = cpumask_next((cpu), cpu_possible_mask))
 
+#define MASK_BITS(mask)	(BITS_PER_BYTE * sizeof(mask))
+
+/*
+ * Iterate over all CPUs a leaf RCU node which are still masked in
+ * @mask.
+ *
+ * Note @rnp must be a leaf node and @mask must be a bitmap for CPUs in @rnp.
+ * And we assume that no CPU is masked in @mask but not set in
+ * cpu_possible_mask. IOW, masks of a leaf node never set a bit for an
+ * "impossible" CPU.
+ */
+#define for_each_leaf_node_cpu(rnp, mask, cpu) \
+	for ((cpu) = (rnp)->grplo + find_first_bit(&(mask), MASK_BITS(mask)); \
+	     (cpu) <= (rnp)->grphi; \
+	     (cpu) = (rnp)->grplo + find_next_bit(&(mask), MASK_BITS(mask), \
+						  (cpu) - (rnp)->grplo + 1)) \
+		/* masked "impossible" CPU is unlikely */ \
+		if (unlikely(!cpu_possible(cpu))) \
+			continue; \
+		else
+
 #endif /* #if defined(SRCU) || !defined(TINY_RCU) */
 
 #endif /* __LINUX_RCU_H */

@@ -394,12 +394,10 @@ static void sync_rcu_exp_select_cpus(struct rcu_state *rsp,
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 
 		/* IPI the remaining CPUs for expedited quiescent state. */
-		for_each_leaf_node_possible_cpu(rnp, cpu) {
+		for_each_leaf_node_cpu(rnp, mask_ofl_ipi, cpu) {
 			unsigned long mask = leaf_node_cpu_bit(rnp, cpu);
 			struct rcu_data *rdp = per_cpu_ptr(rsp->rda, cpu);
 
-			if (!(mask_ofl_ipi & mask))
-				continue;
 retry_ipi:
 			if (rcu_dynticks_in_eqs_since(rdp->dynticks,
 						      rdp->exp_dynticks_snap)) {
@@ -437,7 +435,6 @@ static void synchronize_sched_expedited_wait(struct rcu_state *rsp)
 	int cpu;
 	unsigned long jiffies_stall;
 	unsigned long jiffies_start;
-	unsigned long mask;
 	int ndetected;
 	struct rcu_node *rnp;
 	struct rcu_node *rnp_root = rcu_get_root(rsp);
@@ -462,12 +459,9 @@ static void synchronize_sched_expedited_wait(struct rcu_state *rsp)
 		ndetected = 0;
 		rcu_for_each_leaf_node(rsp, rnp) {
 			ndetected += rcu_print_task_exp_stall(rnp);
-			for_each_leaf_node_possible_cpu(rnp, cpu) {
+			for_each_leaf_node_cpu(rnp, rnp->expmask, cpu) {
 				struct rcu_data *rdp;
 
-				mask = leaf_node_cpu_bit(rnp, cpu);
-				if (!(rnp->expmask & mask))
-					continue;
 				ndetected++;
 				rdp = per_cpu_ptr(rsp->rda, cpu);
 				pr_cont(" %d-%c%c%c", cpu,
@@ -493,14 +487,9 @@ static void synchronize_sched_expedited_wait(struct rcu_state *rsp)
 			}
 			pr_cont("\n");
 		}
-		rcu_for_each_leaf_node(rsp, rnp) {
-			for_each_leaf_node_possible_cpu(rnp, cpu) {
-				mask = leaf_node_cpu_bit(rnp, cpu);
-				if (!(rnp->expmask & mask))
-					continue;
+		rcu_for_each_leaf_node(rsp, rnp)
+			for_each_leaf_node_cpu(rnp, rnp->expmask, cpu)
 				dump_cpu_task(cpu);
-			}
-		}
 		jiffies_stall = 3 * rcu_jiffies_till_stall_check() + 3;
 	}
 }
