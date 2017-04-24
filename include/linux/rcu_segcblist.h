@@ -67,14 +67,14 @@ static inline long rcu_cblist_n_lazy_cbs(struct rcu_cblist *rclp)
 static inline long rcu_cblist_count_cbs(struct rcu_cblist *rclp, long lim)
 {
 	int cnt = 0;
-	struct rcu_head **rhpp = &rclp->head;
+	struct rcu_head *rhp = rclp->head;
 
 	for (;;) {
-		if (!*rhpp)
+		if (!rhp)
 			return cnt;
 		if (++cnt > lim)
 			return -1;
-		rhpp = &(*rhpp)->next;
+		rhp = rhp->next;
 	}
 }
 
