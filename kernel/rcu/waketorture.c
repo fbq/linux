@@ -164,7 +164,7 @@ static struct wake_torture_ops stui_ops = {
 static bool kthread_ran_recently(int tnum)
 {
 	smp_mb(); /* Ensure waiter_cts[] read before waiter_ts[].  [A] */
-	return time_before(READ_ONCE(waiter_ts[tnum]), jiffies + wait_grace);
+	return time_before(jiffies, READ_ONCE(waiter_ts[tnum]) + wait_grace);
 }
 
 /*
