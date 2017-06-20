@@ -508,7 +508,7 @@ wake_torture_init(void)
 	}
 	for (i = 0; i < nrealwaiters; i++) {
 		firsterr = torture_create_kthread(wake_torture_waiter,
-						  NULL, waiter_tasks[i]);
+						  i, waiter_tasks[i]);
 		if (firsterr)
 			goto unwind;
 	}
