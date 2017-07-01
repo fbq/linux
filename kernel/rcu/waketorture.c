@@ -73,6 +73,7 @@ MODULE_PARM_DESC(torture_type, "Type of wait to torture (sti, stui, ...)");
 
 static int nrealwaiters;
 static struct task_struct **waiter_tasks;
+static struct task_struct *checker_task;
 static struct task_struct *stats_task;
 static struct task_struct *onoff_task;
 
@@ -168,12 +169,10 @@ static bool kthread_ran_recently(int tnum)
 }
 
 /*
- * Wakeup torture fake writer kthread.  Repeatedly calls sync, with a random
- * delay between calls.
+ * Wakeup torture waiter kthread.  Repeatedly calls wait.
  */
 static int wake_torture_waiter(void *arg)
 {
-	int i;
 	long me = (long)arg;
 	u64 ts;
 
@@ -193,6 +192,27 @@ static int wake_torture_waiter(void *arg)
 		preempt_disable();
 		ts = trace_clock_local();
 		waiter_iter[me]++;
+		__this_cpu_add(waiter_cputime, trace_clock_local() - ts);
+		preempt_enable();
+		torture_shutdown_absorb("wake_torture_waiter");
+		preempt_disable();
+		ts = trace_clock_local();
+	} while (!torture_must_stop());
+	__this_cpu_add(waiter_cputime, trace_clock_local() - ts);
+	preempt_enable();
+	mutex_lock(&waiter_mutex);
+	waiter_done[me] = true;
+	mutex_unlock(&waiter_mutex);
+	torture_kthread_stopping("wake_torture_waiter");
+	return 0;
+}
+
+static int wake_torture_checker(void *arg)
+{
+	int i;
+
+	VERBOSE_TOROUT_STRING("wake_torture_checker task started");
+	do {
 		for (i = 0; i < nrealwaiters; i++) {
 			if (waiter_done[i] ||
 			    waiter_cts[i] ||
@@ -216,18 +236,9 @@ static int wake_torture_waiter(void *arg)
 				mutex_unlock(&waiter_mutex);
 			}
 		}
-		__this_cpu_add(waiter_cputime, trace_clock_local() - ts);
-		preempt_enable();
-		torture_shutdown_absorb("wake_torture_waiter");
-		preempt_disable();
-		ts = trace_clock_local();
 	} while (!torture_must_stop());
-	__this_cpu_add(waiter_cputime, trace_clock_local() - ts);
-	preempt_enable();
-	mutex_lock(&waiter_mutex);
-	waiter_done[me] = true;
-	mutex_unlock(&waiter_mutex);
-	torture_kthread_stopping("wake_torture_waiter");
+
+	torture_kthread_stopping("wake_torture_checker");
 	return 0;
 }
 
@@ -421,6 +432,8 @@ wake_torture_cleanup(void)
 		kfree(waiter_tasks);
 	}
 
+	torture_stop_kthread(wake_torture_checker, checker_task);
+
 	torture_stop_kthread(wake_torture_stats, stats_task);
 
 	wake_torture_stats_print();  /* -After- the stats thread is stopped! */
@@ -508,10 +521,18 @@ wake_torture_init(void)
 	}
 	for (i = 0; i < nrealwaiters; i++) {
 		firsterr = torture_create_kthread(wake_torture_waiter,
-						  i, waiter_tasks[i]);
+						  (void *)(long)i,
+						  waiter_tasks[i]);
 		if (firsterr)
 			goto unwind;
 	}
+
+	firsterr = torture_create_kthread(wake_torture_checker, NULL,
+					  checker_task);
+
+	if (firsterr)
+		goto unwind;
+
 	if (stat_interval > 0) {
 		firsterr = torture_create_kthread(wake_torture_stats, NULL,
 						  stats_task);
