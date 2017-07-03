@@ -77,6 +77,29 @@ static struct task_struct *checker_task;
 static struct task_struct *stats_task;
 static struct task_struct *onoff_task;
 
+/* Condition array for each waiter to wait on */
+static int *cond;
+/*
+ * waker-wakee topology graph.
+ * to_wake[i*nrealwaiters + j] = 1, means i will wake up j after i is waken.
+ *
+ **/
+static int *to_wake;
+
+static void init_cond(int *cond, int nr)
+{
+	cond[0] = 1;
+}
+
+static void init_waker_wakee_topology(int *to_wake, int nr)
+{
+	int i;
+
+	/* Circle topology */
+	for (i = 0; i < nr; i++)
+		to_wake[i * nr + (i + 1) % nr] = 1;
+}
+
 /* Yes, these cache-thrash, and it is inherent to the concurrency design. */
 static bool *waiter_done;		/* Waiter is done, don't wake. */
 static unsigned long *waiter_iter;	/* Number of wait iterations. */
@@ -108,7 +131,7 @@ MODULE_PARM_DESC(torture_runnable, "Start waketorture at boot");
  */
 
 struct wake_torture_ops {
-	void (*wait)(void);
+	void (*wait)(int idx);
 	const char *name;
 };
 
@@ -118,7 +141,7 @@ static struct wake_torture_ops *cur_ops;
  * Definitions for schedule_hrtimeout() torture testing.
  */
 
-static void wait_schedule_hrtimeout(void)
+static void wait_schedule_hrtimeout(int idx)
 {
 	ktime_t wait = ns_to_ktime(wait_duration * 1000);
 
@@ -135,7 +158,7 @@ static struct wake_torture_ops sh_ops = {
  * Definitions for schedule_timeout_interruptible() torture testing.
  */
 
-static void wait_schedule_timeout_interruptible(void)
+static void wait_schedule_timeout_interruptible(int idx)
 {
 	schedule_timeout_interruptible((wait_duration + 999) / 1000);
 }
@@ -149,7 +172,7 @@ static struct wake_torture_ops sti_ops = {
  * Definitions for schedule_timeout_uninterruptible() torture testing.
  */
 
-static void wait_schedule_timeout_uninterruptible(void)
+static void wait_schedule_timeout_uninterruptible(int idx)
 {
 	schedule_timeout_uninterruptible((wait_duration + 999) / 1000);
 }
@@ -158,6 +181,30 @@ static struct wake_torture_ops stui_ops = {
 	.wait		= wait_schedule_timeout_uninterruptible,
 	.name		= "stui"
 };
+
+static wait_queue_head_t torture_wait_queue;
+
+static void torture_wait_event(int idx)
+{
+	int i;
+
+	wait_event(torture_wait_queue, cond[idx]);
+
+	for (i = 0; i < nrealwaiters; i++)
+		if (to_wake[idx*nrealwaiters + i] == 1) {
+			WRITE_ONCE(cond[i], 1);
+			wake_up(&torture_wait_queue);
+		}
+
+	//FIXME
+	WRITE_ONCE(cond[idx], 0);
+}
+
+static struct wake_torture_ops we_ops = {
+	.wait		= torture_wait_event,
+	.name		= "we"
+};
+
 
 /*
  * Has the specified waiter thread run recently?
@@ -173,7 +220,7 @@ static bool kthread_ran_recently(int tnum)
  */
 static int wake_torture_waiter(void *arg)
 {
-	long me = (long)arg;
+	int me = (long)arg;
 	u64 ts;
 
 	VERBOSE_TOROUT_STRING("wake_torture_waiter task started");
@@ -188,7 +235,7 @@ static int wake_torture_waiter(void *arg)
 		waiter_cts[me] = false;
 		__this_cpu_add(waiter_cputime, trace_clock_local() - ts);
 		preempt_enable();
-		cur_ops->wait();
+		cur_ops->wait(me);
 		preempt_disable();
 		ts = trace_clock_local();
 		waiter_iter[me]++;
@@ -445,6 +492,9 @@ wake_torture_cleanup(void)
 			break;
 		}
 
+	kfree(cond);
+	kfree(to_wake);
+
 	kfree(waiter_done);
 	kfree(waiter_iter);
 	kfree(waiter_cts);
@@ -463,7 +513,7 @@ wake_torture_init(void)
 	int i;
 	int firsterr = 0;
 	static struct wake_torture_ops *torture_ops[] = {
-		&sh_ops, &sti_ops, &stui_ops
+		&sh_ops, &sti_ops, &stui_ops, &we_ops
 	};
 
 	if (!torture_init_begin(torture_type, verbose, &torture_runnable))
@@ -495,6 +545,18 @@ wake_torture_init(void)
 			nrealwaiters = 1;
 	}
 	wake_torture_print_module_parms(cur_ops, "Start of test");
+
+	cond = kcalloc(nrealwaiters, sizeof(*cond), GFP_KERNEL);
+	to_wake = kcalloc(nrealwaiters * nrealwaiters, sizeof(*to_wake), GFP_KERNEL);
+
+	if (!cond || !to_wake) {
+		VERBOSE_TOROUT_ERRSTRING("out of memory");
+		firsterr = -ENOMEM;
+		goto unwind;
+	}
+
+	init_cond(cond, nrealwaiters);
+	init_waker_wakee_topology(to_wake, nrealwaiters);
 
 	/* Initialize the statistics so that each run gets its own numbers. */
 
