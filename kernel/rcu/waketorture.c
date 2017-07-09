@@ -28,7 +28,6 @@
 #include <linux/err.h>
 #include <linux/spinlock.h>
 #include <linux/smp.h>
-#include <linux/rcupdate.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
 #include <linux/atomic.h>
@@ -42,12 +41,13 @@
 #include <linux/cpu.h>
 #include <linux/delay.h>
 #include <linux/stat.h>
-#include <linux/srcu.h>
 #include <linux/slab.h>
 #include <linux/trace_clock.h>
 #include <asm/byteorder.h>
 #include <linux/torture.h>
 #include <linux/vmalloc.h>
+
+#include "rcu.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Paul E. McKenney <paulmck@us.ibm.com>");
