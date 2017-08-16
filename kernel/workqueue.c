@@ -2431,6 +2431,27 @@ struct wq_barrier {
 	struct task_struct	*task;	/* purely informational */
 };
 
+#ifdef CONFIG_LOCKDEP_COMPLETE
+# define INIT_WQ_BARRIER_ONSTACK(barr, func, target)				\
+do {										\
+	INIT_WORK_ONSTACK(&(barr)->work, func);					\
+	__set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(&(barr)->work));	\
+	lockdep_init_map_crosslock((struct lockdep_map *)&(barr)->done.map,	\
+				   "(complete)" #barr,				\
+				   (target)->lockdep_map.key, 1); 		\
+	__init_completion(&barr->done);						\
+	barr->task = current;							\
+} while (0)
+#else
+# define INIT_WQ_BARRIER_ONSTACK(barr, func, target)				\
+do {										\
+	INIT_WORK_ONSTACK(&(barr)->work, func);					\
+	__set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(&(barr)->work));	\
+	init_completion(&barr->done);						\
+	barr->task = current;							\
+} while (0)
+#endif
+
 static void wq_barrier_func(struct work_struct *work)
 {
 	struct wq_barrier *barr = container_of(work, struct wq_barrier, work);
@@ -2474,10 +2495,7 @@ static void insert_wq_barrier(struct pool_workqueue *pwq,
 	 * checks and call back into the fixup functions where we
 	 * might deadlock.
 	 */
-	INIT_WORK_ONSTACK(&barr->work, wq_barrier_func);
-	__set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(&barr->work));
-	init_completion(&barr->done);
-	barr->task = current;
+	INIT_WQ_BARRIER_ONSTACK(barr, wq_barrier_func, target);
 
 	/*
 	 * If @target is currently being executed, schedule the
