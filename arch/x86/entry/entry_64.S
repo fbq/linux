@@ -748,18 +748,6 @@ ENTRY(\sym)
 END(\sym)
 .endm
 
-#ifdef CONFIG_TRACING
-#define trace(sym) trace_##sym
-#define smp_trace(sym) smp_trace_##sym
-
-.macro trace_apicinterrupt num sym
-apicinterrupt3 \num trace(\sym) smp_trace(\sym)
-.endm
-#else
-.macro trace_apicinterrupt num sym do_sym
-.endm
-#endif
-
 /* Make sure APIC interrupt handlers end up in the irqentry section: */
 #define PUSH_SECTION_IRQENTRY	.pushsection .irqentry.text, "ax"
 #define POP_SECTION_IRQENTRY	.popsection
@@ -767,7 +755,6 @@ apicinterrupt3 \num trace(\sym) smp_trace(\sym)
 .macro apicinterrupt num sym do_sym
 PUSH_SECTION_IRQENTRY
 apicinterrupt3 \num \sym \do_sym
-trace_apicinterrupt \num \sym
 POP_SECTION_IRQENTRY
 .endm
 
@@ -912,17 +899,6 @@ ENTRY(\sym)
 	.endif
 END(\sym)
 .endm
-
-#ifdef CONFIG_TRACING
-.macro trace_idtentry sym do_sym has_error_code:req
-idtentry trace(\sym) trace(\do_sym) has_error_code=\has_error_code
-idtentry \sym \do_sym has_error_code=\has_error_code
-.endm
-#else
-.macro trace_idtentry sym do_sym has_error_code:req
-idtentry \sym \do_sym has_error_code=\has_error_code
-.endm
-#endif
 
 idtentry divide_error			do_divide_error			has_error_code=0
 idtentry overflow			do_overflow			has_error_code=0
@@ -1091,7 +1067,7 @@ idtentry xen_stack_segment	do_stack_segment	has_error_code=1
 #endif
 
 idtentry general_protection	do_general_protection	has_error_code=1
-trace_idtentry page_fault	do_page_fault		has_error_code=1
+idtentry page_fault		do_page_fault		has_error_code=1
 
 #ifdef CONFIG_KVM_GUEST
 idtentry async_page_fault	do_async_page_fault	has_error_code=1
