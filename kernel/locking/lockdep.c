@@ -982,21 +982,52 @@ static inline int get_lock_depth(struct lock_list *child)
 	}
 	return depth;
 }
+/*
+ * Return values of a bfs search:
+ *
+ * BFS_E* indicates an error
+ * BFS_R* indicates a result (match or not)
+ *
+ * BFS_EINVALIDNODE: Find a invalid node in the graph.
+ *
+ * BFS_EQUEUEFULL: The queue is full while doing the bfs.
+ *
+ * BFS_RMATCH: Find the matched node in the graph, and put that node * into
+ *            *@target_entry.
+ *
+ * BFS_RNOMATCH: Haven't found the matched node and keep *@target_entry
+ *              _unchanged_.
+ */
+enum bfs_result {
+	BFS_EINVALIDNODE = -2,
+	BFS_EQUEUEFULL = -1,
+	BFS_RMATCH = 0,
+	BFS_RNOMATCH = 1,
+};
 
-static int __bfs(struct lock_list *source_entry,
-		 void *data,
-		 int (*match)(struct lock_list *entry, void *data),
-		 struct lock_list **target_entry,
-		 int forward)
+/*
+ * bfs_result < 0 means error
+ */
+
+static inline bool bfs_error(enum bfs_result res)
+{
+	return res < 0;
+}
+
+static enum bfs_result __bfs(struct lock_list *source_entry,
+			     void *data,
+			     int (*match)(struct lock_list *entry, void *data),
+			     struct lock_list **target_entry,
+			     int forward)
 {
 	struct lock_list *entry;
 	struct list_head *head;
 	struct circular_queue *cq = &lock_cq;
-	int ret = 1;
+	enum bfs_result ret = BFS_RNOMATCH;
 
 	if (match(source_entry, data)) {
 		*target_entry = source_entry;
-		ret = 0;
+		ret = BFS_RMATCH;
 		goto exit;
 	}
 
@@ -1017,7 +1048,7 @@ static int __bfs(struct lock_list *source_entry,
 		__cq_dequeue(cq, (unsigned long *)&lock);
 
 		if (!lock->class) {
-			ret = -2;
+			ret = BFS_EINVALIDNODE;
 			goto exit;
 		}
 
@@ -1034,12 +1065,12 @@ static int __bfs(struct lock_list *source_entry,
 				mark_lock_accessed(entry, lock);
 				if (match(entry, data)) {
 					*target_entry = entry;
-					ret = 0;
+					ret = BFS_RMATCH;
 					goto exit;
 				}
 
 				if (__cq_enqueue(cq, (unsigned long)entry)) {
-					ret = -1;
+					ret = BFS_EQUEUEFULL;
 					goto exit;
 				}
 				cq_depth = __cq_get_elem_count(cq);
@@ -1052,19 +1083,21 @@ exit:
 	return ret;
 }
 
-static inline int __bfs_forwards(struct lock_list *src_entry,
-			void *data,
-			int (*match)(struct lock_list *entry, void *data),
-			struct lock_list **target_entry)
+static inline enum bfs_result
+__bfs_forwards(struct lock_list *src_entry,
+	       void *data,
+	       int (*match)(struct lock_list *entry, void *data),
+	       struct lock_list **target_entry)
 {
 	return __bfs(src_entry, data, match, target_entry, 1);
 
 }
 
-static inline int __bfs_backwards(struct lock_list *src_entry,
-			void *data,
-			int (*match)(struct lock_list *entry, void *data),
-			struct lock_list **target_entry)
+static inline enum bfs_result
+__bfs_backwards(struct lock_list *src_entry,
+		void *data,
+		int (*match)(struct lock_list *entry, void *data),
+		struct lock_list **target_entry)
 {
 	return __bfs(src_entry, data, match, target_entry, 0);
 
@@ -1297,13 +1330,13 @@ unsigned long lockdep_count_backward_deps(struct lock_class *class)
 
 /*
  * Prove that the dependency graph starting at <entry> can not
- * lead to <target>. Print an error and return 0 if it does.
+ * lead to <target>. Print an error and return BFS_RMATCH if it does.
  */
-static noinline int
+static noinline enum bfs_result
 check_noncircular(struct lock_list *root, struct lock_class *target,
-		struct lock_list **target_entry)
+		  struct lock_list **target_entry)
 {
-	int result;
+	enum bfs_result result;
 
 	debug_atomic_inc(nr_cyclic_checks);
 
@@ -1312,11 +1345,11 @@ check_noncircular(struct lock_list *root, struct lock_class *target,
 	return result;
 }
 
-static noinline int
+static noinline enum bfs_result
 check_redundant(struct lock_list *root, struct lock_class *target,
 		struct lock_list **target_entry)
 {
-	int result;
+	enum bfs_result result;
 
 	debug_atomic_inc(nr_redundant_checks);
 
@@ -1345,15 +1378,12 @@ static inline int usage_match(struct lock_list *entry, void *bit)
  *
  * Return 0 if such a node exists in the subgraph, and put that node
  * into *@target_entry.
- *
- * Return 1 otherwise and keep *@target_entry unchanged.
- * Return <0 on error.
  */
-static int
+static enum bfs_result
 find_usage_forwards(struct lock_list *root, enum lock_usage_bit bit,
 			struct lock_list **target_entry)
 {
-	int result;
+	enum bfs_result result;
 
 	debug_atomic_inc(nr_find_usage_forwards_checks);
 
@@ -1365,18 +1395,12 @@ find_usage_forwards(struct lock_list *root, enum lock_usage_bit bit,
 /*
  * Find a node in the backwards-direction dependency sub-graph starting
  * at @root->class that matches @bit.
- *
- * Return 0 if such a node exists in the subgraph, and put that node
- * into *@target_entry.
- *
- * Return 1 otherwise and keep *@target_entry unchanged.
- * Return <0 on error.
  */
-static int
+static enum bfs_result
 find_usage_backwards(struct lock_list *root, enum lock_usage_bit bit,
 			struct lock_list **target_entry)
 {
-	int result;
+	enum bfs_result result;
 
 	debug_atomic_inc(nr_find_usage_backwards_checks);
 
@@ -1586,18 +1610,18 @@ check_usage(struct task_struct *curr, struct held_lock *prev,
 
 	this.class = hlock_class(prev);
 	ret = find_usage_backwards(&this, bit_backwards, &target_entry);
-	if (ret < 0)
+	if (bfs_error(ret))
 		return print_bfs_bug(ret);
-	if (ret == 1)
-		return ret;
+	if (ret == BFS_RNOMATCH)
+		return 1;
 
 	that.parent = NULL;
 	that.class = hlock_class(next);
 	ret = find_usage_forwards(&that, bit_forwards, &target_entry1);
-	if (ret < 0)
+	if (bfs_error(ret))
 		return print_bfs_bug(ret);
-	if (ret == 1)
-		return ret;
+	if (ret == BFS_RNOMATCH)
+		return 1;
 
 	return print_bad_irq_dependency(curr, &this, &that,
 			target_entry, target_entry1,
@@ -1834,10 +1858,10 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	       struct held_lock *next, int distance, struct stack_trace *trace,
 	       int (*save)(struct stack_trace *trace))
 {
-	struct lock_list *uninitialized_var(target_entry);
 	struct lock_list *entry;
+	enum bfs_result ret;
 	struct lock_list this;
-	int ret;
+	struct lock_list *uninitialized_var(target_entry);
 
 	/*
 	 * Prove that the new <prev> -> <next> dependency would not
@@ -1851,7 +1875,7 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	this.class = hlock_class(next);
 	this.parent = NULL;
 	ret = check_noncircular(&this, hlock_class(prev), &target_entry);
-	if (unlikely(!ret)) {
+	if (unlikely(ret == BFS_RMATCH)) {
 		if (!trace->entries) {
 			/*
 			 * If @save fails here, the printing might trigger
@@ -1862,7 +1886,7 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 		}
 		return print_circular_bug(&this, target_entry, next, prev, trace);
 	}
-	else if (unlikely(ret < 0))
+	else if (unlikely(bfs_error(ret)))
 		return print_bfs_bug(ret);
 
 	if (!check_prev_add_irq(curr, prev, next))
@@ -1900,11 +1924,11 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	this.class = hlock_class(prev);
 	this.parent = NULL;
 	ret = check_redundant(&this, hlock_class(next), &target_entry);
-	if (!ret) {
+	if (ret == BFS_RMATCH) {
 		debug_atomic_inc(nr_redundant);
 		return 2;
 	}
-	if (ret < 0)
+	if (bfs_error(ret))
 		return print_bfs_bug(ret);
 
 
@@ -2563,16 +2587,16 @@ static int
 check_usage_forwards(struct task_struct *curr, struct held_lock *this,
 		     enum lock_usage_bit bit, const char *irqclass)
 {
-	int ret;
+	enum bfs_result ret;
 	struct lock_list root;
 	struct lock_list *uninitialized_var(target_entry);
 
 	root.parent = NULL;
 	root.class = hlock_class(this);
 	ret = find_usage_forwards(&root, bit, &target_entry);
-	if (ret < 0)
+	if (bfs_error(ret))
 		return print_bfs_bug(ret);
-	if (ret == 1)
+	if (ret == BFS_RNOMATCH)
 		return ret;
 
 	return print_irq_inversion_bug(curr, &root, target_entry,
@@ -2587,17 +2611,17 @@ static int
 check_usage_backwards(struct task_struct *curr, struct held_lock *this,
 		      enum lock_usage_bit bit, const char *irqclass)
 {
-	int ret;
+	enum bfs_result ret;
 	struct lock_list root;
 	struct lock_list *uninitialized_var(target_entry);
 
 	root.parent = NULL;
 	root.class = hlock_class(this);
 	ret = find_usage_backwards(&root, bit, &target_entry);
-	if (ret < 0)
+	if (bfs_error(ret))
 		return print_bfs_bug(ret);
-	if (ret == 1)
-		return ret;
+	if (ret == BFS_RNOMATCH)
+		return 1;
 
 	return print_irq_inversion_bug(curr, &root, target_entry,
 					this, 0, irqclass);
