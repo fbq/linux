@@ -1502,7 +1502,14 @@ check_redundant(struct lock_list *root, struct lock_class *target,
 
 static inline int usage_match(struct lock_list *entry, void *bit)
 {
-	return entry->class->usage_mask & (1 << (enum lock_usage_bit)bit);
+	enum lock_usage_bit ub = (enum lock_usage_bit)bit;
+
+
+	if (ub & 1)
+		return entry->class->usage_mask & (1 << ub) &&
+		       !entry->is_rr;
+	else
+		return entry->class->usage_mask & (1 << ub);
 }
 
 
@@ -1813,6 +1820,10 @@ static int check_irq_usage(struct task_struct *curr, struct held_lock *prev,
 			   exclusive_bit(bit), state_name(bit)))
 		return 0;
 
+	if (!check_usage(curr, prev, next, bit,
+			   exclusive_bit(bit) + 1, state_name(bit)))
+		return 0;
+
 	bit++; /* _READ */
 
 	/*
@@ -1823,6 +1834,10 @@ static int check_irq_usage(struct task_struct *curr, struct held_lock *prev,
 	 */
 	if (!check_usage(curr, prev, next, bit,
 			   exclusive_bit(bit), state_name(bit)))
+		return 0;
+
+	if (!check_usage(curr, prev, next, bit,
+			   exclusive_bit(bit) + 1, state_name(bit)))
 		return 0;
 
 	return 1;
@@ -2926,7 +2941,6 @@ mark_lock_irq(struct task_struct *curr, struct held_lock *this,
 	if ((!read || !dir || STRICT_READ_CHECKS) &&
 			!usage(curr, this, excl_bit, state_name(new_bit & ~1)))
 		return 0;
-
 	/*
 	 * Check for read in write conflicts
 	 */
@@ -3178,7 +3192,7 @@ static int mark_irqflags(struct task_struct *curr, struct held_lock *hlock)
 	 * mark the lock as used in these contexts:
 	 */
 	if (!hlock->trylock) {
-		if (hlock->read) {
+		if (hlock->read == 2) {
 			if (curr->hardirq_context)
 				if (!mark_lock(curr, hlock,
 						LOCK_USED_IN_HARDIRQ_READ))
@@ -3197,7 +3211,7 @@ static int mark_irqflags(struct task_struct *curr, struct held_lock *hlock)
 		}
 	}
 	if (!hlock->hardirqs_off) {
-		if (hlock->read) {
+		if (hlock->read == 2) {
 			if (!mark_lock(curr, hlock,
 					LOCK_ENABLED_HARDIRQ_READ))
 				return 0;
