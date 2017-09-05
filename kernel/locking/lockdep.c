@@ -1505,7 +1505,14 @@ check_redundant(struct lock_list *root, struct held_lock *target,
 
 static inline int usage_match(struct lock_list *entry, void *bit)
 {
-	return entry->class->usage_mask & (1 << (enum lock_usage_bit)bit);
+	enum lock_usage_bit ub = (enum lock_usage_bit)bit;
+
+
+	if (ub & 1)
+		return entry->class->usage_mask & (1 << ub) &&
+		       !entry->is_rr;
+	else
+		return entry->class->usage_mask & (1 << ub);
 }
 
 
@@ -1816,6 +1823,10 @@ static int check_irq_usage(struct task_struct *curr, struct held_lock *prev,
 			   exclusive_bit(bit), state_name(bit)))
 		return 0;
 
+	if (!check_usage(curr, prev, next, bit,
+			   exclusive_bit(bit) + 1, state_name(bit)))
+		return 0;
+
 	bit++; /* _READ */
 
 	/*
@@ -1826,6 +1837,10 @@ static int check_irq_usage(struct task_struct *curr, struct held_lock *prev,
 	 */
 	if (!check_usage(curr, prev, next, bit,
 			   exclusive_bit(bit), state_name(bit)))
+		return 0;
+
+	if (!check_usage(curr, prev, next, bit,
+			   exclusive_bit(bit) + 1, state_name(bit)))
 		return 0;
 
 	return 1;
