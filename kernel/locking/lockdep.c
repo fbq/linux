@@ -1345,6 +1345,14 @@ static inline int hlock_equal(struct lock_list *entry, void *data)
 	       (hlock->read == 2 || !entry->is_rr);
 }
 
+static inline int hlock_conflict(struct lock_list *entry, void *data)
+{
+	struct held_lock *hlock = (struct held_lock *)data;
+
+	return hlock_class(hlock) == entry->class &&
+	       (hlock->read != 2 || !entry->is_rr);
+}
+
 static noinline int print_circular_bug(struct lock_list *this,
 				struct lock_list *target,
 				struct held_lock *check_src,
@@ -1459,18 +1467,18 @@ unsigned long lockdep_count_backward_deps(struct lock_class *class)
 }
 
 /*
- * Prove that the dependency graph starting at <entry> can not
+ * Prove that the dependency graph starting at <root> can not
  * lead to <target>. Print an error and return BFS_RMATCH if it does.
  */
 static noinline enum bfs_result
-check_noncircular(struct lock_list *root, struct lock_class *target,
+check_noncircular(struct lock_list *root, struct held_lock *target,
 		  struct lock_list **target_entry)
 {
 	enum bfs_result result;
 
 	debug_atomic_inc(nr_cyclic_checks);
 
-	result = __bfs_forwards(root, target, class_equal, target_entry);
+	result = __bfs_forwards(root, target, hlock_conflict, target_entry);
 
 	return result;
 }
