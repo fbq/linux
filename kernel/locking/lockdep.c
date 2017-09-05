@@ -884,6 +884,7 @@ static int add_lock_to_list(struct lock_class *this, struct list_head *head,
 		return 0;
 
 	entry->class = this;
+	entry->dep = dep;
 	entry->distance = distance;
 	entry->trace = *trace;
 	/*
@@ -1022,6 +1023,33 @@ enum bfs_result {
 static inline bool bfs_error(enum bfs_result res)
 {
 	return res < 0;
+}
+
+#define DEP_NN_BIT 0
+#define DEP_RN_BIT 1
+#define DEP_NR_BIT 2
+#define DEP_RR_BIT 3
+
+#define DEP_NN_MASK (1U << (DEP_NN_BIT))
+#define DEP_RN_MASK (1U << (DEP_RN_BIT))
+#define DEP_NR_MASK (1U << (DEP_NR_BIT))
+#define DEP_RR_MASK (1U << (DEP_RR_BIT))
+
+static inline unsigned int __calc_dep_bit(int prev, int next)
+{
+	if (prev == 2 && next != 2)
+		return DEP_RN_BIT;
+	if (prev != 2 && next == 2)
+		return DEP_NR_BIT;
+	if (prev == 2 && next == 2)
+		return DEP_RR_BIT;
+	else
+		return DEP_NN_BIT;
+}
+
+static inline unsigned int calc_dep(int prev, int next)
+{
+	return 1U << __calc_dep_bit(prev, next);
 }
 
 static enum bfs_result __bfs(struct lock_list *source_entry,
@@ -1951,6 +1979,16 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 		if (entry->class == hlock_class(next)) {
 			if (distance == 1)
 				entry->distance = 1;
+			entry->dep |= calc_dep(prev->read, next->read);
+		}
+	}
+
+	/* Also, update the reverse dependency in @next's ->locks_before list */
+	list_for_each_entry(entry, &hlock_class(next)->locks_before, entry) {
+		if (entry->class == hlock_class(prev)) {
+			if (distance == 1)
+				entry->distance = 1;
+			entry->dep |= calc_dep(next->read, prev->read);
 			return 1;
 		}
 	}
@@ -1978,14 +2016,18 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	 */
 	ret = add_lock_to_list(hlock_class(next),
 			       &hlock_class(prev)->locks_after,
-			       next->acquire_ip, distance, trace);
+			       next->acquire_ip, distance,
+			       calc_dep(prev->read, next->read),
+			       trace);
 
 	if (!ret)
 		return 0;
 
 	ret = add_lock_to_list(hlock_class(prev),
 			       &hlock_class(next)->locks_before,
-			       next->acquire_ip, distance, trace);
+			       next->acquire_ip, distance,
+			       calc_dep(next->read, prev->read),
+			       trace);
 	if (!ret)
 		return 0;
 

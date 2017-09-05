@@ -192,6 +192,8 @@ struct lock_list {
 	struct lock_class		*class;
 	struct stack_trace		trace;
 	int				distance;
+	/* bitmap of different dependencies from head to this */
+	u16				dep;
 
 	/*
 	 * The parent field is used to implement breadth-first search, and the
