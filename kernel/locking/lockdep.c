@@ -1362,6 +1362,33 @@ static inline bool class_equal(struct lock_list *entry, void *data)
 	return entry->class == data;
 }
 
+/*
+ * We are about to add B -> A into the dependency graph, and in __bfs() a
+ * strong dependency path A -> .. -> B is found: hlock_class equals
+ * entry->class.
+ *
+ * We will have a deadlock case (conflict) if A -> .. -> B -> A is a strong
+ * dependency cycle, that means:
+ *
+ * Either
+ *
+ *     a) B -> A is E*
+ *
+ * or
+ *
+ *     b) A -> .. -> B is *N (i.e. A -> .. -(*N)-> B)
+ *
+ * as then we don't have *R -> S* in the cycle.
+ */
+static inline bool hlock_conflict(struct lock_list *entry, void *data)
+{
+	struct held_lock *hlock = (struct held_lock *)data;
+
+	return hlock_class(hlock) == entry->class && /* Found A -> .. -> B */
+	       (hlock->read == 0 || /* B -> A is E* */
+		!entry->only_xr); /* A -> .. -> B is *N */
+}
+
 static noinline int print_circular_bug(struct lock_list *this,
 				struct lock_list *target,
 				struct held_lock *check_src,
@@ -1474,18 +1501,18 @@ unsigned long lockdep_count_backward_deps(struct lock_class *class)
 }
 
 /*
- * Prove that the dependency graph starting at <entry> can not
+ * Prove that the dependency graph starting at <root> can not
  * lead to <target>. Print an error and return BFS_RMATCH if it does.
  */
 static noinline enum bfs_result
-check_noncircular(struct lock_list *root, struct lock_class *target,
+check_noncircular(struct lock_list *root, struct held_lock *target,
 		  struct lock_list **target_entry)
 {
 	enum bfs_result result;
 
 	debug_atomic_inc(nr_cyclic_checks);
 
-	result = __bfs_forwards(root, target, class_equal, target_entry);
+	result = __bfs_forwards(root, target, hlock_conflict, target_entry);
 
 	return result;
 }
@@ -2015,7 +2042,7 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	 * keep the stackframe size of the recursive functions low:
 	 */
 	bfs_init_root(&this, next);
-	ret = check_noncircular(&this, hlock_class(prev), &target_entry);
+	ret = check_noncircular(&this, prev, &target_entry);
 	if (unlikely(ret == BFS_RMATCH)) {
 		if (!trace->entries) {
 			/*
