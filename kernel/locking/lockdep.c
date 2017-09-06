@@ -3091,7 +3091,7 @@ static int mark_irqflags(struct task_struct *curr, struct held_lock *hlock)
 	 * mark the lock as used in these contexts:
 	 */
 	if (!hlock->trylock) {
-		if (hlock->read) {
+		if (hlock->read == 2) {
 			if (curr->hardirq_context)
 				if (!mark_lock(curr, hlock,
 						LOCK_USED_IN_HARDIRQ_READ))
@@ -3110,7 +3110,7 @@ static int mark_irqflags(struct task_struct *curr, struct held_lock *hlock)
 		}
 	}
 	if (!hlock->hardirqs_off) {
-		if (hlock->read) {
+		if (hlock->read == 2) {
 			if (!mark_lock(curr, hlock,
 					LOCK_ENABLED_HARDIRQ_READ))
 				return 0;
