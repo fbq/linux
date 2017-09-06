@@ -2034,16 +2034,6 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 		return 0;
 
 	/*
-	 * For recursive read-locks we do all the dependency checks,
-	 * but we dont store read-triggered dependencies (only
-	 * write-triggered dependencies). This ensures that only the
-	 * write-side dependencies matter, and that if for example a
-	 * write-lock never takes any other locks, then the reads are
-	 * equivalent to a NOP.
-	 */
-	if (next->read == 2 || prev->read == 2)
-		return 1;
-	/*
 	 * Is the <prev> -> <next> dependency already present?
 	 *
 	 * (this may occur even though this is a new chain: consider
@@ -2164,7 +2154,7 @@ check_prevs_add(struct task_struct *curr, struct held_lock *next)
 			 * Only non-recursive-read entries get new dependencies
 			 * added:
 			 */
-			if (hlock->read != 2 && hlock->check) {
+			if (hlock->check) {
 				int ret = check_prev_add(curr, hlock, next,
 							 distance, &trace, save);
 				if (!ret)
@@ -4965,7 +4955,7 @@ static inline struct lock_class *xlock_class(struct cross_lock *xlock)
  */
 static inline int depend_before(struct held_lock *hlock)
 {
-	return hlock->read != 2 && hlock->check && !hlock->trylock;
+	return hlock->check && !hlock->trylock;
 }
 
 /*
@@ -4973,7 +4963,7 @@ static inline int depend_before(struct held_lock *hlock)
  */
 static inline int depend_after(struct held_lock *hlock)
 {
-	return hlock->read != 2 && hlock->check;
+	return hlock->check;
 }
 
 /*
