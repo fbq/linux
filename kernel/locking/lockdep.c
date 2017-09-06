@@ -1062,6 +1062,75 @@ static inline u8 calc_depb(struct held_lock *prev, struct held_lock *next)
 	return 1U << __calc_dep_bitb(prev, next);
 }
 
+/*
+ * Initialize a lock_list entry @lock belonging to @class as the root for a BFS
+ * search.
+ */
+static inline void __bfs_init_root(struct lock_list *lock,
+				   struct lock_class *class)
+{
+	lock->class = class;
+	lock->parent = NULL;
+	lock->only_xr = 0;
+}
+
+/*
+ * Initialize a lock_list entry @lock based on a lock acquisition @hlock as the
+ * root for a BFS search.
+ *
+ * ->only_xr of the initial lock node is set to @hlock->read == 2, to make sure
+ * that <prev> -> @hlock and @hlock -> <whatever __bfs() found> is not *R and
+ * S*.
+ */
+static inline void bfs_init_root(struct lock_list *lock,
+				 struct held_lock *hlock)
+{
+	__bfs_init_root(lock, hlock_class(hlock));
+	lock->only_xr = (hlock->read == 2);
+}
+
+/*
+ * Similar to bfs_init_root() but initialize the root for backwards BFS.
+ *
+ * ->only_xr of the initial lock node is set to @hlock->read != 0, to make sure
+ *  that <next> -> @hlock and @hlock -> <whatever backwards BFS found> is not
+ *  *S and R* (reverse order of *R and S*).
+ */
+static inline void bfs_init_rootb(struct lock_list *lock,
+				  struct held_lock *hlock)
+{
+	__bfs_init_root(lock, hlock_class(hlock));
+	lock->only_xr = (hlock->read != 0);
+}
+
+/*
+ * Breadth-First Search to find a strong path in the dependency graph.
+ *
+ * @source_entry: the source of the path we are searching for.
+ * @data: data used for the second parameter of @match function
+ * @match: match function for the search
+ * @target_entry: pointer to the target of a matched path
+ * @forward: direction of path, the lockdep dependency forward or backward
+ *
+ * We may have multiple edges (considering different kinds of dependencies,
+ * e.g. NR and RN) between two nodes in the dependency graph. But
+ * only the strong dependency path in the graph is relevant to deadlocks. A
+ * strong dependency path is a dependency path that doesn't have two adjacent
+ * dependencies as *R -> S*, the reason why strong dependency path can be
+ * defined as this is:
+ *
+ *     In order to make tasks/CPUs to block one by one in a dependency path,
+ *     there must be at least one exclusive holder for each lock, i.e. two
+ *     adjacent dependencies can be *N -> E*, *R -> E* or *N -> S*, but not *R
+ *     -> S*.
+ *
+ * In __bfs(), we only traverse in the strong dependency path:
+ *
+ *     In lock_list::only_xr, we record whether the previous dependency only
+ *     has *R in the search, and if it does (prev only has *R), we filter out
+ *     any S* in the current dependency and after that, the ->only_xr is set
+ *     according to whether we only have *R left.
+ */
 static enum bfs_result __bfs(struct lock_list *source_entry,
 			     void *data,
 			     int (*match)(struct lock_list *entry, void *data),
@@ -1092,6 +1161,7 @@ static enum bfs_result __bfs(struct lock_list *source_entry,
 
 	while (!__cq_empty(cq)) {
 		struct lock_list *lock;
+		bool prev_only_xr;
 
 		__cq_dequeue(cq, (unsigned long *)&lock);
 
@@ -1117,10 +1187,28 @@ static enum bfs_result __bfs(struct lock_list *source_entry,
 		else
 			head = &lock->class->locks_before;
 
+		prev_only_xr = lock->only_xr;
+
 		DEBUG_LOCKS_WARN_ON(!irqs_disabled());
 
 		list_for_each_entry_rcu(entry, head, entry) {
 			unsigned int cq_depth;
+			u8 dep = entry->dep;
+
+			/*
+			 * Mask out all S* if we only have *R in previous
+			 * step, because *R -> S* don't make up a strong
+			 * dependency.
+			 */
+			if (prev_only_xr)
+				dep &= ~(DEP_SR_MASK | DEP_SN_MASK);
+
+			/* If nothing left, we skip */
+			if (!dep)
+				continue;
+
+			/* If there are only *R left, set that for the next step */
+			entry->only_xr = !(dep & (DEP_SN_MASK | DEP_EN_MASK));
 
 			visit_lock_entry(entry, lock);
 			if (match(entry, data)) {
@@ -1348,8 +1436,7 @@ unsigned long lockdep_count_forward_deps(struct lock_class *class)
 	unsigned long ret, flags;
 	struct lock_list this;
 
-	this.parent = NULL;
-	this.class = class;
+	__bfs_init_root(&this, class);
 
 	raw_local_irq_save(flags);
 	arch_spin_lock(&lockdep_lock);
@@ -1375,8 +1462,7 @@ unsigned long lockdep_count_backward_deps(struct lock_class *class)
 	unsigned long ret, flags;
 	struct lock_list this;
 
-	this.parent = NULL;
-	this.class = class;
+	__bfs_init_root(&this, class);
 
 	raw_local_irq_save(flags);
 	arch_spin_lock(&lockdep_lock);
@@ -1665,17 +1751,14 @@ check_usage(struct task_struct *curr, struct held_lock *prev,
 	struct lock_list *uninitialized_var(target_entry);
 	struct lock_list *uninitialized_var(target_entry1);
 
-	this.parent = NULL;
-
-	this.class = hlock_class(prev);
+	bfs_init_rootb(&this, prev);
 	ret = find_usage_backwards(&this, bit_backwards, &target_entry);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
 	if (ret == BFS_RNOMATCH)
 		return 1;
 
-	that.parent = NULL;
-	that.class = hlock_class(next);
+	bfs_init_root(&that, next);
 	ret = find_usage_forwards(&that, bit_forwards, &target_entry1);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
@@ -1931,8 +2014,7 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	 * We are using global variables to control the recursion, to
 	 * keep the stackframe size of the recursive functions low:
 	 */
-	this.class = hlock_class(next);
-	this.parent = NULL;
+	bfs_init_root(&this, next);
 	ret = check_noncircular(&this, hlock_class(prev), &target_entry);
 	if (unlikely(ret == BFS_RMATCH)) {
 		if (!trace->entries) {
@@ -2008,8 +2090,7 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	/*
 	 * Is the <prev> -> <next> link redundant?
 	 */
-	this.class = hlock_class(prev);
-	this.parent = NULL;
+	bfs_init_root(&this, prev);
 	ret = check_redundant(&this, hlock_class(next), &target_entry);
 	if (ret == BFS_RMATCH) {
 		debug_atomic_inc(nr_redundant);
@@ -2682,8 +2763,7 @@ check_usage_forwards(struct task_struct *curr, struct held_lock *this,
 	struct lock_list root;
 	struct lock_list *uninitialized_var(target_entry);
 
-	root.parent = NULL;
-	root.class = hlock_class(this);
+	bfs_init_root(&root, this);
 	ret = find_usage_forwards(&root, bit, &target_entry);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
@@ -2706,8 +2786,7 @@ check_usage_backwards(struct task_struct *curr, struct held_lock *this,
 	struct lock_list root;
 	struct lock_list *uninitialized_var(target_entry);
 
-	root.parent = NULL;
-	root.class = hlock_class(this);
+	bfs_init_root(&root, this);
 	ret = find_usage_backwards(&root, bit, &target_entry);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
