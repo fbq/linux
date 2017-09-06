@@ -871,7 +871,7 @@ static struct lock_list *alloc_list_entry(void)
  * Add a new dependency to the head of the list:
  */
 static int add_lock_to_list(struct lock_class *this, struct list_head *head,
-			    unsigned long ip, int distance,
+			    unsigned long ip, int distance, unsigned int dep,
 			    struct stack_trace *trace)
 {
 	struct lock_list *entry;
@@ -1052,6 +1052,54 @@ static inline unsigned int calc_dep(int prev, int next)
 	return 1U << __calc_dep_bit(prev, next);
 }
 
+/*
+ * return -1 if no proper dependency could be picked
+ * return 0 if a * --> N dependency could be picked
+ * return 1 if only a * --> R dependency could be picked
+ *
+ * N: non-recursive lock
+ * R: recursive read lock
+ */
+static inline int pick_dep(u16 is_rr, u16 cap_dep)
+{
+	if (is_rr) { /* could only pick N --> */
+		if (cap_dep & DEP_NN_MASK)
+			return 0;
+		else if (cap_dep & DEP_NR_MASK)
+			return 1;
+		else
+			return -1;
+	} else {
+		if (cap_dep & DEP_NN_MASK || cap_dep & DEP_RN_MASK)
+			return 0;
+		else
+			return 1;
+	}
+}
+
+/*
+ * Initialize a lock_list entry @lock belonging to @class as the root for a BFS
+ * search.
+ */
+static inline void __bfs_init_root(struct lock_list *lock,
+				   struct lock_class *class)
+{
+	lock->class = class;
+	lock->parent = NULL;
+	lock->is_rr = 0;
+}
+
+/*
+ * Initialize a lock_list entry @lock based on a lock acquisition @hlock as the
+ * root for a BFS search.
+ */
+static inline void bfs_init_root(struct lock_list *lock,
+				 struct held_lock *hlock)
+{
+	__bfs_init_root(lock, hlock_class(hlock));
+	lock->is_rr = (hlock->read == 2);
+}
+
 static enum bfs_result __bfs(struct lock_list *source_entry,
 			     void *data,
 			     int (*match)(struct lock_list *entry, void *data),
@@ -1062,6 +1110,7 @@ static enum bfs_result __bfs(struct lock_list *source_entry,
 	struct list_head *head;
 	struct circular_queue *cq = &lock_cq;
 	enum bfs_result ret = BFS_RNOMATCH;
+	int is_rr, next_is_rr;
 
 	if (match(source_entry, data)) {
 		*target_entry = source_entry;
@@ -1107,10 +1156,17 @@ static enum bfs_result __bfs(struct lock_list *source_entry,
 		else
 			head = &lock->class->locks_before;
 
+		is_rr = lock->is_rr;
+
 		DEBUG_LOCKS_WARN_ON(!irqs_disabled());
 
 		list_for_each_entry_rcu(entry, head, entry) {
 			unsigned int cq_depth;
+
+			next_is_rr = pick_dep(is_rr, entry->dep);
+			if (next_is_rr < 0)
+				continue;
+			entry->is_rr = next_is_rr;
 
 			visit_lock_entry(entry, lock);
 			if (match(entry, data)) {
@@ -1362,8 +1418,7 @@ unsigned long lockdep_count_forward_deps(struct lock_class *class)
 	unsigned long ret, flags;
 	struct lock_list this;
 
-	this.parent = NULL;
-	this.class = class;
+	__bfs_init_root(&this, class);
 
 	local_irq_save(flags);
 	arch_spin_lock(&lockdep_lock);
@@ -1389,8 +1444,7 @@ unsigned long lockdep_count_backward_deps(struct lock_class *class)
 	unsigned long ret, flags;
 	struct lock_list this;
 
-	this.parent = NULL;
-	this.class = class;
+	__bfs_init_root(&this, class);
 
 	local_irq_save(flags);
 	arch_spin_lock(&lockdep_lock);
@@ -1677,17 +1731,14 @@ check_usage(struct task_struct *curr, struct held_lock *prev,
 	struct lock_list *uninitialized_var(target_entry);
 	struct lock_list *uninitialized_var(target_entry1);
 
-	this.parent = NULL;
-
-	this.class = hlock_class(prev);
+	bfs_init_root(&this, prev);
 	ret = find_usage_backwards(&this, bit_backwards, &target_entry);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
 	if (ret == BFS_RNOMATCH)
 		return 1;
 
-	that.parent = NULL;
-	that.class = hlock_class(next);
+	bfs_init_root(&that, next);
 	ret = find_usage_forwards(&that, bit_forwards, &target_entry1);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
@@ -1946,9 +1997,8 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	 * We are using global variables to control the recursion, to
 	 * keep the stackframe size of the recursive functions low:
 	 */
-	this.class = hlock_class(next);
-	this.parent = NULL;
-	ret = check_noncircular(&this, hlock_class(prev), &target_entry);
+	bfs_init_root(&this, next);
+	ret = check_noncircular(&this, prev, &target_entry);
 	if (unlikely(ret == BFS_RMATCH))
 		return print_circular_bug(&this, target_entry, next, prev, trace);
 	else if (unlikely(bfs_error(ret)))
@@ -1996,8 +2046,7 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 	/*
 	 * Is the <prev> -> <next> link redundant?
 	 */
-	this.class = hlock_class(prev);
-	this.parent = NULL;
+	bfs_init_root(&this, prev);
 	ret = check_redundant(&this, hlock_class(next), &target_entry);
 	if (ret == BFS_RMATCH) {
 		debug_atomic_inc(nr_redundant);
@@ -2762,8 +2811,7 @@ check_usage_forwards(struct task_struct *curr, struct held_lock *this,
 	struct lock_list root;
 	struct lock_list *uninitialized_var(target_entry);
 
-	root.parent = NULL;
-	root.class = hlock_class(this);
+	bfs_init_root(&root, this);
 	ret = find_usage_forwards(&root, bit, &target_entry);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
@@ -2786,8 +2834,7 @@ check_usage_backwards(struct task_struct *curr, struct held_lock *this,
 	struct lock_list root;
 	struct lock_list *uninitialized_var(target_entry);
 
-	root.parent = NULL;
-	root.class = hlock_class(this);
+	bfs_init_root(&root, this);
 	ret = find_usage_backwards(&root, bit, &target_entry);
 	if (bfs_error(ret))
 		return print_bfs_bug(ret);
