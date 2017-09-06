@@ -1357,9 +1357,40 @@ print_circular_bug_header(struct lock_list *entry, unsigned int depth,
 	return 0;
 }
 
-static inline bool class_equal(struct lock_list *entry, void *data)
+/*
+ * We are about to add A -> B into the dependency graph, and in __bfs() a
+ * strong dependency path A -> .. -> B is found: hlock_class equals
+ * entry->class.
+ *
+ * If A -> .. -> B can replace A -> B in any __bfs() search (means the former
+ * is _stronger_ than or equal to the latter), we consider A -> B as redundant.
+ * For example if A -> .. -> B is EN (i.e. A -(E*)-> .. -(*N)-> B), and A -> B
+ * is ER or EN, then we don't need to add A -> B into the dependency graph, as
+ * any strong path ..-> A -> B ->.. we can get with having dependency A -> B,
+ * we could already get a equivalent path ..-> A -> .. -> B -> .. with A -> ..
+ * -> B. Therefore A -> B is reduntant.
+ *
+ * We need to make sure both the start and the end of A -> .. -> B is not
+ * weaker than A -> B. For the start part, please see the comment before
+ * call-site of check_redundant() in check_prev_add(). For the end part, we
+ * need:
+ *
+ * Either
+ *
+ *     a) A -> B is *R (everything is not weaker than that)
+ *
+ * or
+ *
+ *     b) A -> .. -> B is *N (nothing is stronger than this)
+ *
+ */
+static inline bool hlock_equal(struct lock_list *entry, void *data)
 {
-	return entry->class == data;
+	struct held_lock *hlock = (struct held_lock *)data;
+
+	return hlock_class(hlock) == entry->class && /* Found A -> .. -> B */
+	       (hlock->read == 2 ||  /* A -> B is *R */
+		!entry->only_xr); /* A -> .. -> B is *N */
 }
 
 /*
@@ -1518,14 +1549,14 @@ check_noncircular(struct lock_list *root, struct held_lock *target,
 }
 
 static noinline enum bfs_result
-check_redundant(struct lock_list *root, struct lock_class *target,
+check_redundant(struct lock_list *root, struct held_lock *target,
 		struct lock_list **target_entry)
 {
 	enum bfs_result result;
 
 	debug_atomic_inc(nr_redundant_checks);
 
-	result = __bfs_forwards(root, target, class_equal, target_entry);
+	result = __bfs_forwards(root, target, hlock_equal, target_entry);
 
 	return result;
 }
@@ -2116,9 +2147,19 @@ check_prev_add(struct task_struct *curr, struct held_lock *prev,
 
 	/*
 	 * Is the <prev> -> <next> link redundant?
+	 *
+	 * Special setup for check_redundant().
+	 *
+	 * To report redundant, we need to find a strong dependency path that
+	 * is equal to or stronger than <prev> -> <next>. So if <prev> is E,
+	 * we need to let __bfs() only search for a path starting at a E*, we
+	 * achieve this by setting the initial node's ->only_xr to true in
+	 * that case. And if <prev> is S, we set initial ->only_xr to false
+	 * because both S* (equal) and E* (stronger) are redundant.
 	 */
-	bfs_init_root(&this, prev);
-	ret = check_redundant(&this, hlock_class(next), &target_entry);
+	__bfs_init_root(&this, hlock_class(prev));
+	this.only_xr = prev->read == 0;
+	ret = check_redundant(&this, next, &target_entry);
 	if (ret == BFS_RMATCH) {
 		debug_atomic_inc(nr_redundant);
 		return 2;
