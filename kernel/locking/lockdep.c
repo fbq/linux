@@ -4157,6 +4157,34 @@ void lock_release(struct lockdep_map *lock, int nested,
 }
 EXPORT_SYMBOL_GPL(lock_release);
 
+/*
+ * lock_sync() - synchronize with all previous critical sections to finish.
+ *
+ * Simply a acquire+release annotation with hardirqoff is true, because no lock
+ * is actually held, so this annotaion alone is safe to be interrupted as if
+ * irqs are off
+ */
+void lock_sync(struct lockdep_map *lock, unsigned subclass, int read,
+	       int check, struct lockdep_map *nest_lock, unsigned long ip)
+{
+	unsigned long flags;
+
+	if (unlikely(current->lockdep_recursion))
+		return;
+
+	raw_local_irq_save(flags);
+	check_flags(flags);
+
+	current->lockdep_recursion = 1;
+	__lock_acquire(lock, subclass, 0, read, check, 1, nest_lock, ip, 0, 0);
+	if (__lock_release(lock, 0, ip))
+		check_chain_key(current);
+
+	current->lockdep_recursion = 0;
+	raw_local_irq_restore(flags);
+}
+EXPORT_SYMBOL_GPL(lock_sync);
+
 int lock_is_held_type(const struct lockdep_map *lock, int read)
 {
 	unsigned long flags;
