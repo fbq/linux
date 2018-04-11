@@ -50,6 +50,7 @@ __setup("debug_locks_verbose=", setup_debug_locks_verbose);
 #define LOCKTYPE_RWSEM	0x8
 #define LOCKTYPE_WW	0x10
 #define LOCKTYPE_RTMUTEX 0x20
+#define LOCKTYPE_SRCU	0x40
 
 static struct ww_acquire_ctx t, t2;
 static struct ww_mutex o, o2, o3;
@@ -85,6 +86,11 @@ static DEFINE_RT_MUTEX(rtmutex_B);
 static DEFINE_RT_MUTEX(rtmutex_C);
 static DEFINE_RT_MUTEX(rtmutex_D);
 
+#endif
+
+#ifdef CONFIG_SRCU
+static struct srcu_struct srcu_A;
+static struct srcu_struct srcu_B;
 #endif
 
 /*
@@ -162,6 +168,11 @@ static void init_shared_classes(void)
 	__rt_mutex_init(&rtmutex_Y2, __func__, &rt_Y);
 	__rt_mutex_init(&rtmutex_Z1, __func__, &rt_Z);
 	__rt_mutex_init(&rtmutex_Z2, __func__, &rt_Z);
+#endif
+
+#ifdef CONFIG_SRCU
+	init_srcu_struct(&srcu_A);
+	init_srcu_struct(&srcu_B);
 #endif
 
 	init_class_X(&lock_X1, &rwlock_X1, &mutex_X1, &rwsem_X1);
@@ -2201,6 +2212,146 @@ static void ww_tests(void)
 	pr_cont("\n");
 }
 
+static void srcu_ABBA(void)
+{
+	int ia, ib;
+
+	ia = srcu_read_lock(&srcu_A);
+	synchronize_srcu(&srcu_B);
+	srcu_read_unlock(&srcu_A, ia);
+
+	ib = srcu_read_lock(&srcu_B);
+	synchronize_srcu(&srcu_A);
+	srcu_read_unlock(&srcu_B, ib); // should fail
+}
+
+static void srcu_inversion(void)
+{
+	int ia;
+
+	HARDIRQ_ENTER();
+	ia = srcu_read_lock(&srcu_A);
+	srcu_read_unlock(&srcu_A, ia);
+	HARDIRQ_EXIT();
+
+	synchronize_srcu(&srcu_A); // should not fail
+}
+
+static void srcu_tests(void)
+{
+	printk("  --------------------------------------------------------------------------\n");
+	printk("  | SRCU tests |\n");
+	printk("  ---------------\n");
+	print_testname("ABBA read-sync/read-sync");
+	dotest(srcu_ABBA, FAILURE, LOCKTYPE_SRCU);
+	pr_cont("\n");
+
+	print_testname("irq inversion");
+	dotest(srcu_inversion, SUCCESS, LOCKTYPE_SRCU);
+	pr_cont("\n");
+}
+
+/*
+ * <in hardirq handler>
+ * read_lock(&A);
+ *			<hardirq disable>
+ *			spin_lock(&B);
+ * spin_lock(&B);
+ *			read_lock(&A);
+ *
+ * is a deadlock.
+ */
+static void queued_read_lock_hardirq_RE_Er(void)
+{
+	HARDIRQ_ENTER();
+	read_lock(&rwlock_A);
+	LOCK(B);
+	UNLOCK(B);
+	read_unlock(&rwlock_A);
+	HARDIRQ_EXIT();
+
+	HARDIRQ_DISABLE();
+	LOCK(B);
+	read_lock(&rwlock_A);
+	read_unlock(&rwlock_A);
+	UNLOCK(B);
+	HARDIRQ_ENABLE();
+}
+
+/*
+ * <in hardirq handler>
+ * spin_lock(&B);
+ *			<hardirq disable>
+ *			read_lock(&A);
+ * read_lock(&A);
+ *			spin_lock(&B);
+ *
+ * is not a deadlock.
+ */
+static void queued_read_lock_hardirq_ER_rE(void)
+{
+	HARDIRQ_ENTER();
+	LOCK(B);
+	read_lock(&rwlock_A);
+	read_unlock(&rwlock_A);
+	UNLOCK(B);
+	HARDIRQ_EXIT();
+
+	HARDIRQ_DISABLE();
+	read_lock(&rwlock_A);
+	LOCK(B);
+	UNLOCK(B);
+	read_unlock(&rwlock_A);
+	HARDIRQ_ENABLE();
+}
+
+/*
+ * <hardirq disable>
+ * spin_lock(&B);
+ *			read_lock(&A);
+ *			<in hardirq handler>
+ *			spin_lock(&B);
+ * read_lock(&A);
+ *
+ * is a deadlock. Because the two read_lock()s are both non-recursive readers.
+ */
+static void queued_read_lock_hardirq_inversion(void)
+{
+
+	HARDIRQ_ENTER();
+	LOCK(B);
+	UNLOCK(B);
+	HARDIRQ_EXIT();
+
+	HARDIRQ_DISABLE();
+	LOCK(B);
+	read_lock(&rwlock_A);
+	read_unlock(&rwlock_A);
+	UNLOCK(B);
+	HARDIRQ_ENABLE();
+
+	read_lock(&rwlock_A);
+	read_unlock(&rwlock_A);
+}
+
+static void queued_read_lock_tests(void)
+{
+	printk("  --------------------------------------------------------------------------\n");
+	printk("  | queued read lock tests |\n");
+	printk("  ---------------------------\n");
+	print_testname("hardirq read-lock/lock-read");
+	dotest(queued_read_lock_hardirq_RE_Er, FAILURE, LOCKTYPE_RWLOCK);
+	pr_cont("\n");
+
+	print_testname("hardirq lock-read/read-lock");
+	dotest(queued_read_lock_hardirq_ER_rE, SUCCESS, LOCKTYPE_RWLOCK);
+	pr_cont("\n");
+
+	print_testname("hardirq inversion");
+	dotest(queued_read_lock_hardirq_inversion, FAILURE, LOCKTYPE_RWLOCK);
+	pr_cont("\n");
+}
+
 void locking_selftest(void)
 {
 	/*
@@ -2312,11 +2463,14 @@ void locking_selftest(void)
 	DO_TESTCASE_6x2x2RW("irq read-recursion #2", irq_read_recursion2);
 
 	ww_tests();
+	srcu_tests();
 
 	force_read_lock_recursive = 0;
 	/*
 	 * queued_read_lock() specific test cases can be put here
 	 */
+	if (IS_ENABLED(CONFIG_QUEUED_RWLOCKS))
+		queued_read_lock_tests();
 
 	if (unexpected_testcase_failures) {
 		printk("-----------------------------------------------------------------\n");
