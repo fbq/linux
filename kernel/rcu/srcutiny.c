@@ -198,6 +198,8 @@ void synchronize_srcu(struct srcu_struct *sp)
 {
 	struct rcu_synchronize rs;
 
+	srcu_lock_sync(&sp->dep_map);
+
 	/* this is a no-op if scheduler is inactive */
 	if (rcu_scheduler_active == RCU_SCHEDULER_INACTIVE)
 		return;

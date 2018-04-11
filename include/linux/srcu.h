@@ -133,12 +133,58 @@ static inline int srcu_read_lock_held(const struct srcu_struct *sp)
 	return lock_is_held(&sp->dep_map);
 }
 
+/**
+ * lockdep annotations for srcu_read_{un,}lock, and synchronize_srcu():
+ *
+ * srcu_read_lock() and srcu_read_unlock() are similar to rcu_read_lock() and
+ * rcu_read_unlock(), they are recursive read locks. But we mark them as
+ * "check", they will be added into lockdep dependency graph for deadlock
+ * detection. And we also annotate synchronize_srcu() as a
+ * write_lock()+write_unlock(), because synchronize_srcu() will wait for any
+ * corresponding previous srcu_read_lock() to release, and that acts like a
+ * empty grab-and-drop write lock.
+ *
+ * We do so because multiple sleepable rcu instances may cause deadlock as
+ * follow:
+ *
+ *   Task 1:
+ *     ia = srcu_read_lock(&srcu_A);
+ *     synchronize_srcu(&srcu_B);
+ *     srcu_read_unlock(&srcu_A, ia);
+ *
+ *   Task 2:
+ *     ib = srcu_read_lock(&srcu_B);
+ *     synchronize_srcu(&srcu_A);
+ *     srcu_read_unlock(&srcu_B, ib);
+ *
+ * And we want lockdep to detect this or more complicated deadlock with SRCU
+ * involved.
+ */
+static inline void srcu_lock_acquire(struct lockdep_map *map)
+{
+	lock_map_acquire_read(map);
+}
+
+static inline void srcu_lock_release(struct lockdep_map *map)
+{
+	lock_map_release(map);
+}
+
+static inline void srcu_lock_sync(struct lockdep_map *map)
+{
+	lock_map_sync(map);
+}
+
 #else /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
 
 static inline int srcu_read_lock_held(const struct srcu_struct *sp)
 {
 	return 1;
 }
+
+#define srcu_lock_acquire(m)	do { } while (0)
+#define srcu_lock_release(m)	do { } while (0)
+#define srcu_lock_sync(m)	do { } while (0)
 
 #endif /* #else #ifdef CONFIG_DEBUG_LOCK_ALLOC */
 
@@ -196,7 +242,7 @@ static inline int srcu_read_lock(struct srcu_struct *sp) __acquires(sp)
 	int retval;
 
 	retval = __srcu_read_lock(sp);
-	rcu_lock_acquire(&(sp)->dep_map);
+	srcu_lock_acquire(&(sp)->dep_map);
 	return retval;
 }
 
@@ -220,7 +266,7 @@ srcu_read_lock_notrace(struct srcu_struct *sp) __acquires(sp)
 static inline void srcu_read_unlock(struct srcu_struct *sp, int idx)
 	__releases(sp)
 {
-	rcu_lock_release(&(sp)->dep_map);
+	srcu_lock_release(&(sp)->dep_map);
 	__srcu_read_unlock(sp, idx);
 }
 

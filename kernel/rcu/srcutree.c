@@ -1013,6 +1013,8 @@ EXPORT_SYMBOL_GPL(synchronize_srcu_expedited);
  */
 void synchronize_srcu(struct srcu_struct *sp)
 {
+	srcu_lock_sync(&sp->dep_map);
+
 	if (srcu_might_be_idle(sp) || rcu_gp_is_expedited())
 		synchronize_srcu_expedited(sp);
 	else
