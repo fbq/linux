@@ -9,6 +9,7 @@
 
 #include <asm/unistd.h>
 #include <uapi/linux/time.h>
+#include <clocksource/hyperv_timer.h>
 
 #define __VDSO_USE_SYSCALL		ULLONG_MAX
 
@@ -66,6 +67,14 @@ int clock_getres_fallback(clockid_t _clkid, struct __kernel_timespec *_ts)
 	return ret;
 }
 
+#ifdef CONFIG_HYPERV_TSCPAGE
+extern struct ms_hyperv_tsc_page _hvclock_page __attribute__((visibility("hidden")));
+static u64 vread_hvclock(void)
+{
+	return hv_read_tsc_page(&_hvclock_page);
+}
+#endif
+
 static __always_inline u64 __arch_get_hw_counter(s32 clock_mode)
 {
 	u64 res;
@@ -82,14 +91,14 @@ static __always_inline u64 __arch_get_hw_counter(s32 clock_mode)
 	 * is speculated.
 	 */
 	isb();
-	asm volatile("mrs %0, cntvct_el0" : "=r" (res) :: "memory");
+	//asm volatile("mrs %0, cntvct_el0" : "=r" (res) :: "memory");
 	/*
 	 * This isb() is required to prevent that the seq lock is
 	 * speculated.#
 	 */
 	isb();
 
-	return res;
+	return vread_hvclock();
 }
 
 static __always_inline

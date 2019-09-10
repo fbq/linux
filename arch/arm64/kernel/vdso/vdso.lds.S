@@ -17,7 +17,13 @@ OUTPUT_ARCH(aarch64)
 
 SECTIONS
 {
-	PROVIDE(_vdso_data = . - PAGE_SIZE);
+	/*
+	 * vdso data pages:
+	 *   vdso data (1 page)
+	 *   hv tsc page (1 page)
+	 */
+	PROVIDE(_vdso_data = . - 2 * PAGE_SIZE);
+	PROVIDE(_hvclock_page = _vdso_data + PAGE_SIZE);
 	. = VDSO_LBASE + SIZEOF_HEADERS;
 
 	.hash		: { *(.hash) }			:text

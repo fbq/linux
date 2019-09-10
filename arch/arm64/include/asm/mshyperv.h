@@ -98,7 +98,7 @@ extern void hv_get_vpreg_128(u32 reg, struct hv_get_vp_register_output *result);
 #endif
 
 /* ARM64 specific code to read the hardware clock */
-#define hv_get_raw_timer() arch_timer_read_counter()
+#define hv_get_raw_timer() __arch_counter_get_cntvct()
 
 #include <asm-generic/mshyperv.h>
 
