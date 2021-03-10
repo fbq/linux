@@ -14,6 +14,7 @@ use kernel::{
     file_operations::FileOperations,
     miscdev, mutex_init, spinlock_init,
     sync::{Mutex, SpinLock},
+    thread::Thread,
 };
 
 module! {
@@ -95,6 +96,22 @@ impl KernelModule for RustExample {
             spinlock_init!(data.as_ref(), "RustExample::init::data2");
             *data.lock() = 10;
             println!("Value: {}", *data.lock());
+        }
+
+        // Test threads.
+        {
+            let mut a = 1;
+
+            let t1 = Thread::new(
+                move || {
+                    for _ in 0..20 {
+                        a = a + 1;
+                        println!("Hello Rust Thread {}", a);
+                    }
+                },
+                "Rust thread",
+            );
+            t1.wake_up();
         }
 
         // Including this large variable on the stack will trigger
