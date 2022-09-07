@@ -125,6 +125,8 @@ else
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
+	KBUILD_ZIGFLAGS += -target x86_64-freestanding-none
+
         # Align jump targets to 1 byte, not the default 16 bytes:
         KBUILD_CFLAGS += $(call cc-option,-falign-jumps=1)
 
@@ -157,6 +159,7 @@ else
 
         KBUILD_CFLAGS += -mno-red-zone
         KBUILD_CFLAGS += -mcmodel=kernel
+	KBUILD_ZIGFLAGS += -mcmodel=kernel
 endif
 
 #

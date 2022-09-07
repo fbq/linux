@@ -161,6 +161,12 @@ quiet_cmd_cc_o_c = CC $(quiet_modtag)  $@
 		$(cmd_ld_single_m) \
 		$(cmd_objtool)
 
+quiet_cmd_zig_o_zig = ZIG $(quite_modtag)    $@
+      cmd_zig_o_zig = $(ZIG) $(zig_flags) -femit-bin=$@ $<
+
+$(obj)/%.o: $(src)/%.zig FORCE
+	$(call cmd,zig_o_zig)
+
 ifdef CONFIG_MODVERSIONS
 # When module versioning is enabled the following steps are executed:
 # o compile a <file>.o from <file>.c

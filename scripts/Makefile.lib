@@ -4,10 +4,12 @@ asflags-y  += $(EXTRA_AFLAGS)
 ccflags-y  += $(EXTRA_CFLAGS)
 cppflags-y += $(EXTRA_CPPFLAGS)
 ldflags-y  += $(EXTRA_LDFLAGS)
+zigflags-y  += $(EXTRA_ZIGCFLAGS)
 
 # flags that take effect in current and sub directories
 KBUILD_AFLAGS += $(subdir-asflags-y)
 KBUILD_CFLAGS += $(subdir-ccflags-y)
+KBUILD_ZIGFLAGS += $(subdir-zigflags-y)
 
 # Figure out what we need to build from the various variables
 # ===========================================================================
@@ -134,6 +136,10 @@ _a_flags       = $(filter-out $(AFLAGS_REMOVE_$(target-stem).o), \
                      $(AFLAGS_$(target-stem).o))
 _cpp_flags     = $(KBUILD_CPPFLAGS) $(cppflags-y) $(CPPFLAGS_$(target-stem).lds)
 
+_zig_flags       = $(filter-out $(ZIGFLAGS_REMOVE_$(target-stem).o), \
+                     $(filter-out $(zigflags-remove-y), \
+                         $(KBUILD_ZIGFLAGS) $(zigflags-y))) \
+
 #
 # Enable gcov profiling flags for a file, directory or for all files depending
 # on variables GCOV_PROFILE_obj.o, GCOV_PROFILE and CONFIG_GCOV_PROFILE_ALL
@@ -210,6 +216,8 @@ c_flags        = -Wp,-MMD,$(depfile) $(NOSTDINC_FLAGS) $(LINUXINCLUDE)     \
 		 -include $(srctree)/include/linux/compiler_types.h       \
 		 $(_c_flags) $(modkern_cflags)                           \
 		 $(basename_flags) $(modname_flags)
+
+zig_flags      = $(filter-out -include %.h, $(LINUXINCLUDE)) $(_zig_flags)
 
 a_flags        = -Wp,-MMD,$(depfile) $(NOSTDINC_FLAGS) $(LINUXINCLUDE)     \
 		 $(_a_flags) $(modkern_aflags)

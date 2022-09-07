@@ -4578,6 +4578,7 @@ static void __init kfree_rcu_batch_init(void)
 		pr_err("Failed to register kfree_rcu() shrinker!\n");
 }
 
+extern void do_zig(int);
 void __init rcu_init(void)
 {
 	int cpu = smp_processor_id();
@@ -4589,6 +4590,7 @@ void __init rcu_init(void)
 	sanitize_kthread_prio();
 	rcu_init_geometry();
 	rcu_init_one();
+	do_zig(12);
 	if (dump_tree)
 		rcu_dump_rcu_node_tree();
 	if (use_softirq)
