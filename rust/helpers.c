@@ -32,6 +32,9 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/rust.h>
+
 __noreturn void rust_helper_BUG(void)
 {
 	BUG();
@@ -156,6 +159,14 @@ void rust_helper_init_work_with_key(struct work_struct *work, work_func_t func,
 	work->func = func;
 }
 EXPORT_SYMBOL_GPL(rust_helper_init_work_with_key);
+
+void rust_helper_trace_arc_drop_inner(const char *name,
+				      unsigned long name_len,
+				      const void *ptr)
+{
+	trace_arc_drop_inner(name, name_len, ptr);
+}
+EXPORT_SYMBOL_GPL(rust_helper_trace_arc_drop_inner);
 
 /*
  * `bindgen` binds the C `size_t` type as the Rust `usize` type, so we can
