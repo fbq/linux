@@ -30,6 +30,7 @@
 #include <linux/sched/signal.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
+#include <linux/hyperv.h>
 
 __noreturn void rust_helper_BUG(void)
 {
@@ -143,6 +144,18 @@ struct kunit *rust_helper_kunit_get_current_test(void)
 	return kunit_get_current_test();
 }
 EXPORT_SYMBOL_GPL(rust_helper_kunit_get_current_test);
+
+void rust_helper_hv_set_drvdata(struct hv_device *dev, void *data)
+{
+	hv_set_drvdata(dev, data);
+}
+EXPORT_SYMBOL_GPL(rust_helper_hv_set_drvdata);
+
+void *rust_helper_hv_get_drvdata(struct hv_device *dev)
+{
+	return hv_get_drvdata(dev);
+}
+EXPORT_SYMBOL_GPL(rust_helper_hv_get_drvdata);
 
 /*
  * `bindgen` binds the C `size_t` type the Rust `usize` type, so we can
