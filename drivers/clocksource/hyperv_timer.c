@@ -85,6 +85,13 @@ static int hv_ce_set_next_event(unsigned long delta,
 	return 0;
 }
 
+static int hv_ce_set_oneshot_stopped(struct clock_event_device *evt)
+{
+	// Writing 0 disables the timer.
+	hv_set_register(HV_REGISTER_STIMER0_COUNT, 0);
+	return 0;
+}
+
 static int hv_ce_shutdown(struct clock_event_device *evt)
 {
 	hv_set_register(HV_REGISTER_STIMER0_COUNT, 0);
@@ -141,6 +148,7 @@ static int hv_stimer_init(unsigned int cpu)
 	ce->set_state_shutdown = hv_ce_shutdown;
 	ce->set_state_oneshot = hv_ce_set_oneshot;
 	ce->set_next_event = hv_ce_set_next_event;
+	ce->set_state_oneshot_stopped = hv_ce_set_oneshot_stopped;
 
 	clockevents_config_and_register(ce,
 					HV_CLOCK_HZ,
