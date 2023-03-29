@@ -126,13 +126,13 @@ mod std_vendor;
 /// # Ok::<(), Error>(())
 /// ```
 pub struct Arc<T: ?Sized> {
-    ptr: NonNull<ArcInner<T>>,
-    _p: PhantomData<ArcInner<T>>,
+    ptr: NonNull<WithRef<T>>,
+    _p: PhantomData<WithRef<T>>,
 }
 
 #[pin_data]
 #[repr(C)]
-struct ArcInner<T: ?Sized> {
+struct WithRef<T: ?Sized> {
     refcount: Opaque<bindings::refcount_t>,
     data: T,
 }
@@ -164,7 +164,7 @@ impl<T> Arc<T> {
     /// Constructs a new reference counted instance of `T`.
     pub fn try_new(contents: T) -> Result<Self, AllocError> {
         // INVARIANT: The refcount is initialised to a non-zero value.
-        let value = ArcInner {
+        let value = WithRef {
             // SAFETY: There are no safety requirements for this FFI call.
             refcount: Opaque::new(unsafe { bindings::REFCOUNT_INIT(1) }),
             data: contents,
@@ -201,13 +201,13 @@ impl<T> Arc<T> {
 }
 
 impl<T: ?Sized> Arc<T> {
-    /// Constructs a new [`Arc`] from an existing [`ArcInner`].
+    /// Constructs a new [`Arc`] from an existing [`WithRef`].
     ///
     /// # Safety
     ///
     /// The caller must ensure that `inner` points to a valid location and has a non-zero reference
     /// count, one of which will be owned by the new [`Arc`] instance.
-    unsafe fn from_inner(inner: NonNull<ArcInner<T>>) -> Self {
+    unsafe fn from_inner(inner: NonNull<WithRef<T>>) -> Self {
         // INVARIANT: By the safety requirements, the invariants hold.
         Arc {
             ptr: inner,
@@ -240,12 +240,12 @@ impl<T: ?Sized> Arc<T> {
         let val_offset = unsafe { refcount_layout.extend(val_layout).unwrap_unchecked().1 };
 
         let metadata: <T as Pointee>::Metadata = core::ptr::metadata(ptr);
-        // SAFETY: The metadata of `T` and `ArcInner<T>` is the same because `ArcInner` is a struct
+        // SAFETY: The metadata of `T` and `WithRef<T>` is the same because `WithRef` is a struct
         // with `T` as its last field.
         //
         // This is documented at:
         // <https://doc.rust-lang.org/std/ptr/trait.Pointee.html>.
-        let metadata: <ArcInner<T> as Pointee>::Metadata =
+        let metadata: <WithRef<T> as Pointee>::Metadata =
             unsafe { core::mem::transmute_copy(&metadata) };
         // SAFETY: The pointer is in-bounds of an allocation both before and after offsetting the
         // pointer, since it originates from a previous call to `Arc::into_raw` and is still valid.
@@ -295,7 +295,7 @@ impl<T: 'static> ForeignOwnable for Arc<T> {
     unsafe fn borrow<'a>(ptr: *const core::ffi::c_void) -> ArcBorrow<'a, T> {
         // SAFETY: By the safety requirement of this function, we know that `ptr` came from
         // a previous call to `Arc::into_foreign`.
-        let inner = unsafe { NonNull::new_unchecked(ptr as *mut ArcInner<T>) };
+        let inner = unsafe { NonNull::new_unchecked(ptr as *mut WithRef<T>) };
 
         // SAFETY: The safety requirements ensure that we will not give up our
         // foreign-owned refcount while the `ArcBorrow` is still live.
@@ -427,7 +427,7 @@ impl<T: ?Sized> From<Pin<UniqueArc<T>>> for Arc<T> {
 /// # Ok::<(), Error>(())
 /// ```
 pub struct ArcBorrow<'a, T: ?Sized + 'a> {
-    inner: NonNull<ArcInner<T>>,
+    inner: NonNull<WithRef<T>>,
     _p: PhantomData<&'a ()>,
 }
 
@@ -457,7 +457,7 @@ impl<T: ?Sized> ArcBorrow<'_, T> {
     /// Callers must ensure the following for the lifetime of the returned [`ArcBorrow`] instance:
     /// 1. That `inner` remains valid;
     /// 2. That no mutable references to `inner` are created.
-    unsafe fn new(inner: NonNull<ArcInner<T>>) -> Self {
+    unsafe fn new(inner: NonNull<WithRef<T>>) -> Self {
         // INVARIANT: The safety requirements guarantee the invariants.
         Self {
             inner,
@@ -577,7 +577,7 @@ impl<T> UniqueArc<T> {
     /// Tries to allocate a new [`UniqueArc`] instance whose contents are not initialised yet.
     pub fn try_new_uninit() -> Result<UniqueArc<MaybeUninit<T>>, AllocError> {
         // INVARIANT: The refcount is initialised to a non-zero value.
-        let inner = Box::try_init::<AllocError>(try_init!(ArcInner {
+        let inner = Box::try_init::<AllocError>(try_init!(WithRef {
             // SAFETY: There are no safety requirements for this FFI call.
             refcount: Opaque::new(unsafe { bindings::REFCOUNT_INIT(1) }),
             data <- init::uninit::<T, AllocError>(),
