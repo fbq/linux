@@ -60,6 +60,7 @@ __setup("debug_locks_verbose=", setup_debug_locks_verbose);
 #define LOCKTYPE_RTMUTEX 0x20
 #define LOCKTYPE_LL	0x40
 #define LOCKTYPE_SPECIAL 0x80
+#define LOCKTYPE_RUST	0x100
 
 static struct ww_acquire_ctx t, t2;
 static struct ww_mutex o, o2, o3;
@@ -1427,7 +1428,7 @@ static int testcase_successes;
 static int expected_testcase_failures;
 static int unexpected_testcase_failures;
 
-static void dotest(void (*testcase_fn)(void), int expected, int lockclass_mask)
+void dotest(void (*testcase_fn)(void), int expected, int lockclass_mask)
 {
 	int saved_preempt_count = preempt_count();
 #ifdef CONFIG_PREEMPT_RT
