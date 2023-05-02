@@ -26,6 +26,8 @@ impl kernel::Module for RustMinimal {
         numbers.try_push(108)?;
         numbers.try_push(200)?;
 
+        kernel::sync::rcu::test_rcu()?;
+
         Ok(RustMinimal { numbers })
     }
 }
