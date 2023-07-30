@@ -134,16 +134,31 @@ pub(crate) fn kunit_tests(attr: TokenStream, ts: TokenStream) -> TokenStream {
     )
     .unwrap();
 
-    let new_body: TokenStream = vec![body.stream(), kunit_macros.parse().unwrap()]
-        .into_iter()
-        .collect();
-
     // Remove the `#[test]` macros.
-    let new_body = new_body.to_string().replace("#[test]", "");
-    tokens.push(TokenTree::Group(Group::new(
-        Delimiter::Brace,
-        new_body.parse().unwrap(),
-    )));
+    let mut new_body = vec![];
+    let mut body_it = body.stream().into_iter();
+
+    while let Some(token) = body_it.next() {
+        match token {
+            TokenTree::Punct(ref c) if c.as_char() == '#' => match body_it.next() {
+                Some(TokenTree::Group(g)) if g.to_string() == "[test]" => (),
+                Some(next) => {
+                    new_body.extend([token, next]);
+                }
+                _ => {
+                    new_body.push(token);
+                }
+            },
+            _ => {
+                new_body.push(token);
+            }
+        }
+    }
+
+    let mut new_body = TokenStream::from_iter(new_body);
+    new_body.extend::<TokenStream>(kunit_macros.parse().unwrap());
+
+    tokens.push(TokenTree::Group(Group::new(Delimiter::Brace, new_body)));
 
     tokens.into_iter().collect()
 }
