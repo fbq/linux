@@ -6,6 +6,7 @@
 
 use crate::{
     bindings,
+    error::Result,
     sync::lock::{Backend, Lock},
     types::ForeignOwnable,
 };
@@ -13,6 +14,8 @@ use crate::{
 use core::marker::PhantomData;
 use core::ops::Deref;
 use core::sync::atomic::{AtomicPtr, Ordering::*};
+use core::sync::atomic::fence;
+use alloc::boxed::Box;
 
 /// Evidence that the RCU read side lock is held on the current thread/CPU.
 ///
@@ -56,6 +59,123 @@ impl Drop for RcuGuard {
 /// Acquires the RCU read side lock.
 pub fn read_lock() -> RcuGuard {
     RcuGuard::new()
+}
+
+/// An unsafe wrapper of RCU pointers
+///
+/// # Invariants
+///
+/// `ptr` needs to be either null or a valid pointer to T and protected by RCU
+pub struct UnsafeRcu<T> {
+    ptr: AtomicPtr<T>
+}
+
+impl<T> UnsafeRcu<T> {
+    pub fn load(&self) -> *mut T {
+        self.ptr.load(Relaxed)
+    }
+
+    /// Get a RCU protected reference.
+    ///
+    /// Note that the reference cannot outlive the corresponding RCU read lock guard, however it's
+    /// possible the it outlives the pointer.
+    pub fn dereference<'rcu>(&self, _guard: &'rcu RcuGuard) -> Option<&'rcu T> {
+        let p = self.load();
+
+        if p.is_null() {
+            return None;
+        }
+
+        // ORDERING: Address dependencies are provided by the stronger Acquire.
+        fence(Acquire);
+
+        // SAFETY: Per invariants, `p` is a valid pointer, and since there is an RCU read-side
+        // critical section outlives the return value, so the reference is under RCU protection and
+        // therefore is valid through the whole lifetime.
+        Some(unsafe { &* p })
+    }
+
+    /// Set a new value to the pointer
+    ///
+    /// # Safety
+    ///
+    /// * `new` needs to a either null or a valid pointer to T
+    /// * `new` needs to be under RCU protection, i.e. recycling of `new` will need to wait for
+    /// pre-existing RCU readers to finish.
+    pub unsafe fn set(&self, new: *mut T) {
+        self.ptr.store(new, Release);
+    }
+
+    pub unsafe fn new(ptr: *mut T) -> Self {
+        Self {
+            ptr: AtomicPtr::new(ptr)
+        }
+    }
+
+    pub unsafe fn swap(&self, new: *mut T) -> *mut T {
+        // xchg
+        self.ptr.swap(new, AcqRel)
+    }
+
+    pub fn null() -> Self {
+        Self {
+            ptr: AtomicPtr::new(core::ptr::null_mut())
+        }
+    }
+}
+
+pub struct BoxRcu<T> {
+    ptr: UnsafeRcu<T>,
+    _owned: PhantomData<T>
+}
+
+impl<T> BoxRcu<T> {
+    pub fn new(data: T) -> Result<Self> {
+        Ok(Self {
+            ptr: unsafe { UnsafeRcu::new(Box::into_raw(Box::try_new(data)?)) },
+            _owned: PhantomData
+        })
+    }
+
+    pub fn null() -> Self {
+        Self {
+            ptr: UnsafeRcu::null(),
+            _owned: PhantomData
+        }
+    }
+
+    pub fn dereference<'rcu>(&self, guard: &'rcu RcuGuard) -> Option<&'rcu T> {
+        self.ptr.dereference(guard)
+    }
+
+    pub unsafe fn swap(&self, new: Box<T>) -> Option<Box<T>> {
+        let old = unsafe {
+            self.ptr.swap(Box::into_raw(new))
+        };
+
+        if old.is_null() {
+            None
+        } else {
+            Some(unsafe { Box::from_raw(old) })
+        }
+    }
+
+    pub fn update(&self, new: Box<T>) {
+        // SAFETY: We are going to `synchronize_rcu()` before dropping the return, so it's safe.
+        let old = unsafe { self.swap(new) };
+
+        if let Some(old) = old {
+            unsafe { bindings::synchronize_rcu(); }
+
+            drop(old);
+        }
+    }
+}
+
+impl<T> Drop for BoxRcu<T> {
+    fn drop(&mut self) {
+        unsafe { bindings::synchronize_rcu(); }
+    }
 }
 
 /// A RCU protected pointer.
@@ -128,7 +248,7 @@ impl<P: ForeignOwnable> Rcu<P> {
     ///
     /// Note that since RCU provides that readers (i.e. [`Self::dereference`]) are not blocked by
     /// the updaters, so we cannot define this function a mutable one, hence the `unsafe` is used.
-    pub(crate) unsafe fn unsafe_swap(&self, new: P) -> RcuOld<P> {
+    pub(crate) unsafe fn replace(&self, new: P) -> RcuOld<P> {
         let old_ptr = self.ptr.load(Acquire);
 
         self.ptr.store(new.into_foreign().cast_mut(), Release);
@@ -242,7 +362,7 @@ impl<T: ?Sized, B: Backend> Updater<'_, T, B> {
 
         // SAFETY: `T` owns the RCU field, and with `Guard` of `T` means exclusive accesses among
         // updaters.
-        unsafe { (*ptr).unsafe_swap(new) }
+        unsafe { (*ptr).replace(new) }
     }
 
     /// Reads a RCU field.
@@ -315,6 +435,125 @@ use crate::macros::kunit_tests;
 
 #[kunit_tests(rust_rcu)]
 mod tests {
+
+    #[test]
+    fn test_rcu_unsafe() {
+        use super::*;
+        use alloc::boxed::Box;
+        use kernel::prelude::*;
+        use kernel::sync::Arc;
+        use kernel::sync::SpinLock;
+        use kernel::{c_str, static_lock_class};
+        use core::ptr::{addr_of, addr_of_mut};
+
+        #[derive(Copy, Clone)]
+        struct Config {
+            x: i32,
+            y: i32,
+            z: i32,
+        }
+
+        fn update<T>(data: &UnsafeRcu<T>, new: T) -> Result {
+            let new_box: Box<T> = Box::try_new(new)?;
+
+            let new: *mut T = Box::into_raw(new_box);
+
+            let old = unsafe { data.swap(new) };
+
+            if !old.is_null() {
+                unsafe { bindings::synchronize_rcu(); }
+
+                // SAFETY: `old` was previously set by the update function, so it comes from
+                // a previous `Box::into_raw`, and since we called `synchronize_rcu` after `swap`,
+                // no reader is referencing the old data now.
+                drop(unsafe { Box::from_raw(old) });
+            }
+
+            Ok(())
+        }
+
+        unsafe fn copy_update<T: Copy>(data: &UnsafeRcu<T>, update: fn(&mut T)) -> Result {
+            let old = data.load();
+
+            if old.is_null() {
+                return Ok(());
+            }
+
+            let mut new_box: Box<T> = Box::try_new(unsafe {*old})?;
+
+            update(&mut new_box);
+
+            let new: *mut T = Box::into_raw(new_box);
+
+            unsafe { data.set(new); }
+
+            if !old.is_null() {
+                unsafe { bindings::synchronize_rcu(); }
+
+                // SAFETY: `old` was previously set by the update function, so it comes from
+                // a previous `Box::into_raw`, and since we called `synchronize_rcu` after `swap`,
+                // no reader is referencing the old data now.
+                drop(unsafe { Box::from_raw(old) });
+            }
+
+            Ok(())
+        }
+
+        let d = UnsafeRcu::null();
+
+        update(&d, Config { x: 1, y: 2, z: 3 }).unwrap();
+
+        assert_eq!(d.dereference(&RcuGuard::new()).unwrap().x, 1);
+
+        update(&d, Config { x: 2, y: 2, z: 3 }).unwrap();
+
+        assert_eq!(d.dereference(&RcuGuard::new()).unwrap().x, 2);
+
+        unsafe { copy_update(&d, |cfg| { cfg.x = 3 }); }
+
+        assert_eq!(d.dereference(&RcuGuard::new()).unwrap().x, 3);
+        assert_eq!(d.dereference(&RcuGuard::new()).unwrap().y, 2);
+    }
+
+    #[test]
+    fn test_rcu_list() {
+        use super::*;
+        use alloc::boxed::Box;
+        use kernel::prelude::*;
+        use kernel::sync::Arc;
+        use kernel::sync::SpinLock;
+        use kernel::{c_str, static_lock_class};
+
+        struct Foo {
+            x: i32,
+            next: Rcu<Box<Option<Foo>>>,
+        }
+        impl_field!(projection Foo { next: Rcu<Box<Option<Foo>>> } as FooNext);
+
+        fn for_each<F: FnMut(&Foo)>(list: &Rcu<Box<Option<Foo>>>, mut f: F) {
+            let mut tmp = list;
+            let g = read_lock();
+
+            while let Some(foo) = tmp.dereference(&g).as_ref() {
+                tmp = &foo.next;
+                f(foo);
+            }
+        }
+
+        let foo0 = Foo { x: 3, next: Rcu::new(Box::try_new(None).unwrap()) };
+        let foo1 = Foo { x: 2, next: Rcu::new(Box::try_new(Some(foo0)).unwrap()) };
+        let foo2 = Foo { x: 1, next: Rcu::new(Box::try_new(Some(foo1)).unwrap()) };
+
+        let mut count = 0;
+        let mut sum = 0;
+        for_each(&Rcu::new(Box::try_new(Some(foo2)).unwrap()), |foo: &Foo| {
+            count += 1;
+            sum += foo.x;
+        });
+
+        assert_eq!(count, 3);
+        assert_eq!(sum, 6);
+    }
 
     #[test]
     fn test_rcu() {
@@ -403,9 +642,19 @@ mod tests {
 
         /*
          * Won't compile.
-        let c_ref = foo_lock.project::<_, FooA>().dereference(&Guard::new());
-        pr_info!("{}", c_ref.0);
-        */
+         * let c_ref = foo_lock.project::<_, FooC>().dereference(&read_lock());
+         */
+
+        // reference can outlive a RCU pointer but not the RCU read side lock.
+        let g = read_lock();
+        let c_ref = {
+            let f = foo_lock.project::<_, FooC>();
+            f.dereference(&g)
+        };
+
+        assert_eq!(c_ref, &43);
+        drop(g);
+        /* */
 
         assert_eq!(foo_lock.project::<_, FooC>().dereference(&read_lock()), &43);
         assert_eq!(
