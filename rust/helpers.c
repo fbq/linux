@@ -40,13 +40,11 @@ __noreturn void rust_helper_BUG(void)
 {
 	BUG();
 }
-EXPORT_SYMBOL_GPL(rust_helper_BUG);
 
 void rust_helper_mutex_lock(struct mutex *lock)
 {
 	mutex_lock(lock);
 }
-EXPORT_SYMBOL_GPL(rust_helper_mutex_lock);
 
 void rust_helper___spin_lock_init(spinlock_t *lock, const char *name,
 				  struct lock_class_key *key)
@@ -57,142 +55,119 @@ void rust_helper___spin_lock_init(spinlock_t *lock, const char *name,
 	spin_lock_init(lock);
 #endif
 }
-EXPORT_SYMBOL_GPL(rust_helper___spin_lock_init);
 
 void rust_helper_spin_lock(spinlock_t *lock)
 {
 	spin_lock(lock);
 }
-EXPORT_SYMBOL_GPL(rust_helper_spin_lock);
 
 void rust_helper_spin_unlock(spinlock_t *lock)
 {
 	spin_unlock(lock);
 }
-EXPORT_SYMBOL_GPL(rust_helper_spin_unlock);
 
 void rust_helper_init_wait(struct wait_queue_entry *wq_entry)
 {
 	init_wait(wq_entry);
 }
-EXPORT_SYMBOL_GPL(rust_helper_init_wait);
 
 int rust_helper_signal_pending(struct task_struct *t)
 {
 	return signal_pending(t);
 }
-EXPORT_SYMBOL_GPL(rust_helper_signal_pending);
 
 refcount_t rust_helper_REFCOUNT_INIT(int n)
 {
 	return (refcount_t)REFCOUNT_INIT(n);
 }
-EXPORT_SYMBOL_GPL(rust_helper_REFCOUNT_INIT);
 
 void rust_helper_refcount_inc(refcount_t *r)
 {
 	refcount_inc(r);
 }
-EXPORT_SYMBOL_GPL(rust_helper_refcount_inc);
 
 bool rust_helper_refcount_dec_and_test(refcount_t *r)
 {
 	return refcount_dec_and_test(r);
 }
-EXPORT_SYMBOL_GPL(rust_helper_refcount_dec_and_test);
 
 __force void *rust_helper_ERR_PTR(long err)
 {
 	return ERR_PTR(err);
 }
-EXPORT_SYMBOL_GPL(rust_helper_ERR_PTR);
 
 bool rust_helper_IS_ERR(__force const void *ptr)
 {
 	return IS_ERR(ptr);
 }
-EXPORT_SYMBOL_GPL(rust_helper_IS_ERR);
 
 long rust_helper_PTR_ERR(__force const void *ptr)
 {
 	return PTR_ERR(ptr);
 }
-EXPORT_SYMBOL_GPL(rust_helper_PTR_ERR);
 
 const char *rust_helper_errname(int err)
 {
 	return errname(err);
 }
-EXPORT_SYMBOL_GPL(rust_helper_errname);
 
 struct task_struct *rust_helper_get_current(void)
 {
 	return current;
 }
-EXPORT_SYMBOL_GPL(rust_helper_get_current);
 
 void rust_helper_get_task_struct(struct task_struct *t)
 {
 	get_task_struct(t);
 }
-EXPORT_SYMBOL_GPL(rust_helper_get_task_struct);
 
 void rust_helper_put_task_struct(struct task_struct *t)
 {
 	put_task_struct(t);
 }
-EXPORT_SYMBOL_GPL(rust_helper_put_task_struct);
 
 kuid_t rust_helper_task_uid(struct task_struct *task)
 {
 	return task_uid(task);
 }
-EXPORT_SYMBOL_GPL(rust_helper_task_uid);
 
 kuid_t rust_helper_task_euid(struct task_struct *task)
 {
 	return task_euid(task);
 }
-EXPORT_SYMBOL_GPL(rust_helper_task_euid);
 
 #ifndef CONFIG_USER_NS
 uid_t rust_helper_from_kuid(struct user_namespace *to, kuid_t uid)
 {
 	return from_kuid(to, uid);
 }
-EXPORT_SYMBOL_GPL(rust_helper_from_kuid);
 #endif /* CONFIG_USER_NS */
 
 bool rust_helper_uid_eq(kuid_t left, kuid_t right)
 {
 	return uid_eq(left, right);
 }
-EXPORT_SYMBOL_GPL(rust_helper_uid_eq);
 
 kuid_t rust_helper_current_euid(void)
 {
 	return current_euid();
 }
-EXPORT_SYMBOL_GPL(rust_helper_current_euid);
 
 struct user_namespace *rust_helper_current_user_ns(void)
 {
 	return current_user_ns();
 }
-EXPORT_SYMBOL_GPL(rust_helper_current_user_ns);
 
 pid_t rust_helper_task_tgid_nr_ns(struct task_struct *tsk,
 				  struct pid_namespace *ns)
 {
 	return task_tgid_nr_ns(tsk, ns);
 }
-EXPORT_SYMBOL_GPL(rust_helper_task_tgid_nr_ns);
 
 struct kunit *rust_helper_kunit_get_current_test(void)
 {
 	return kunit_get_current_test();
 }
-EXPORT_SYMBOL_GPL(rust_helper_kunit_get_current_test);
 
 void rust_helper_init_work_with_key(struct work_struct *work, work_func_t func,
 				    bool onstack, const char *name,
@@ -204,44 +179,37 @@ void rust_helper_init_work_with_key(struct work_struct *work, work_func_t func,
 	INIT_LIST_HEAD(&work->entry);
 	work->func = func;
 }
-EXPORT_SYMBOL_GPL(rust_helper_init_work_with_key);
 
 struct file *rust_helper_get_file(struct file *f)
 {
 	return get_file(f);
 }
-EXPORT_SYMBOL_GPL(rust_helper_get_file);
 
 const struct cred *rust_helper_get_cred(const struct cred *cred)
 {
 	return get_cred(cred);
 }
-EXPORT_SYMBOL_GPL(rust_helper_get_cred);
 
 void rust_helper_put_cred(const struct cred *cred)
 {
 	put_cred(cred);
 }
-EXPORT_SYMBOL_GPL(rust_helper_put_cred);
 
 #ifndef CONFIG_SECURITY
 void rust_helper_security_cred_getsecid(const struct cred *c, u32 *secid)
 {
 	security_cred_getsecid(c, secid);
 }
-EXPORT_SYMBOL_GPL(rust_helper_security_cred_getsecid);
 
 int rust_helper_security_secid_to_secctx(u32 secid, char **secdata, u32 *seclen)
 {
 	return security_secid_to_secctx(secid, secdata, seclen);
 }
-EXPORT_SYMBOL_GPL(rust_helper_security_secid_to_secctx);
 
 void rust_helper_security_release_secctx(char *secdata, u32 seclen)
 {
 	security_release_secctx(secdata, seclen);
 }
-EXPORT_SYMBOL_GPL(rust_helper_security_release_secctx);
 #endif
 
 void rust_helper_init_task_work(struct callback_head *twork,
@@ -249,7 +217,6 @@ void rust_helper_init_task_work(struct callback_head *twork,
 {
 	init_task_work(twork, func);
 }
-EXPORT_SYMBOL_GPL(rust_helper_init_task_work);
 
 /*
  * `bindgen` binds the C `size_t` type as the Rust `usize` type, so we can

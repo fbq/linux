@@ -8,7 +8,8 @@ always-$(CONFIG_RUST) += exports_core_generated.h
 
 # Missing prototypes are expected in the helpers since these are exported
 # for Rust only, thus there is no header nor prototypes.
-obj-$(CONFIG_RUST) += helpers.o
+# obj-$(CONFIG_RUST) += helpers.o
+always-$(CONFIG_RUST) += helpers.bc
 CFLAGS_REMOVE_helpers.o = -Wmissing-prototypes -Wmissing-declarations
 
 always-$(CONFIG_RUST) += libmacros.so
@@ -404,11 +405,13 @@ quiet_cmd_rustc_library = $(if $(skip_clippy),RUSTC,$(RUSTC_OR_CLIPPY_QUIET)) L 
 	OBJTREE=$(abspath $(objtree)) \
 	$(if $(skip_clippy),$(RUSTC),$(RUSTC_OR_CLIPPY)) \
 		$(filter-out $(skip_flags),$(rust_flags) $(rustc_target_flags)) \
-		--emit=dep-info=$(depfile) --emit=obj=$@ \
+		--emit=dep-info=$(depfile) --emit=llvm-bc=$(patsubst %.o,%.bc,$@) \
 		--emit=metadata=$(dir $@)$(patsubst %.o,lib%.rmeta,$(notdir $@)) \
 		--crate-type rlib -L$(objtree)/$(obj) \
 		--crate-name $(patsubst %.o,%,$(notdir $@)) $< \
-		--sysroot=/dev/null \
+		--sysroot=/dev/null; \
+	llvm-link $(patsubst %.o,%.bc,$@) $(obj)/helpers.bc -o $(patsubst %.o,%.m.bc,$@); \
+	$(CC) -O2 -c $(patsubst %.o,%.m.bc,$@) -o $@ \
 	$(if $(rustc_objcopy),;$(OBJCOPY) $(rustc_objcopy) $@)
 
 rust-analyzer:
@@ -453,6 +456,12 @@ $(obj)/alloc.o: $(src)/alloc/lib.rs $(obj)/compiler_builtins.o FORCE
 
 $(obj)/build_error.o: $(src)/build_error.rs $(obj)/compiler_builtins.o FORCE
 	+$(call if_changed_dep,rustc_library)
+
+$(obj)/helpers.bc: $(src)/helpers.c
+	$(CC) $(c_flags) -S $< -emit-llvm -o $(patsubst %.bc,%.ll,$@)
+	sed -i 's/^define dso_local/define linkonce_odr dso_local/g' $(patsubst %.bc,%.ll,$@)
+	sed -i 's/^; Function Attrs:/; Function Attrs: inlinehint/g' $(patsubst %.bc,%.ll,$@)
+	llvm-as $(patsubst %.bc,%.ll,$@) -o $@
 
 $(obj)/bindings.o: $(src)/bindings/lib.rs \
     $(obj)/compiler_builtins.o \
