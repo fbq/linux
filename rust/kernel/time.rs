@@ -63,6 +63,91 @@ impl Ktime {
     pub fn to_ms(self) -> i64 {
         self.divns_constant::<NSEC_PER_MSEC>()
     }
+
+    /// Checked substraction on [`Self`].
+    ///
+    /// Returns [`None`] if an arithmetic overflow would occur.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kernel::time::Ktime;
+    ///
+    /// let ts1 = Ktime::ktime_get();
+    /// let ts2 = Ktime::ktime_get();
+    ///
+    /// // An impossible ktime stamp only to demonstrate overflow behaviors.
+    /// let impossible = Ktime::from_raw(i64::MIN);
+    ///
+    /// // `ktime_get()` is monotonic.
+    /// assert_eq!(ts2.checked_sub(ts1).map(|d| d.to_ns() >= 0), Some(true));
+    ///
+    /// // `ktime_get()` is always non-negative, so this will trigger an overflow: `checked_sub()`
+    /// // returns `None` in this case.
+    /// assert!(ts2.checked_sub(impossible).is_none());
+    /// ```
+    #[inline]
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        self.inner
+            .checked_sub(other.inner)
+            .map(|inner| Self { inner })
+    }
+
+    /// Wrapping substraction on [`Self`] with overflow detection.
+    ///
+    /// Returns a tuple of the subtraction along with a boolean indicating whether an arithmetic
+    /// overflow would occur.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kernel::time::Ktime;
+    ///
+    /// let ts1 = Ktime::ktime_get();
+    /// let ts2 = Ktime::ktime_get();
+    ///
+    /// // An impossible ktime stamp only to demonstrate overflow behaviors.
+    /// let impossible = Ktime::from_raw(i64::MIN);
+    ///
+    /// // `ktime_get()` is monotonic, and overflow shouldn't happen.
+    /// let (d, is_overflow) = ts2.overflowing_sub(ts1);
+    /// assert!(d.to_ns() >= 0 && !is_overflow);
+    ///
+    /// // `ktime_get()` is always non-negative, so this will trigger an overflow.
+    /// let (_, is_overflow) = ts2.overflowing_sub(impossible);
+    /// assert!(is_overflow);
+    /// ```
+    #[inline]
+    pub fn overflowing_sub(self, other: Self) -> (Self, bool) {
+        let (inner, is_overflow) = self.inner.overflowing_sub(other.inner);
+        (Self { inner }, is_overflow)
+    }
+
+    /// Wrapping substraction on [`Self`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kernel::time::Ktime;
+    ///
+    /// let ts1 = Ktime::ktime_get();
+    /// let ts2 = Ktime::ktime_get();
+    ///
+    /// // An impossible ktime stamp only to demonstrate overflow behaviors.
+    /// let impossible = Ktime::from_raw(i64::MIN);
+    ///
+    /// // `ktime_get()` is monotonicpen.
+    /// assert!(ts2.wrapping_sub(ts1).to_ns() >= 0);
+    ///
+    /// // `ktime_get()` is always non-negative, so the wrapped result should always be negative.
+    /// assert!(ts2.wrapping_sub(impossible).to_ns() < 0);
+    /// ```
+    #[inline]
+    pub fn wrapping_sub(self, other: Self) -> Self {
+        Self {
+            inner: self.inner.wrapping_sub(other.inner),
+        }
+    }
 }
 
 /// Returns the number of milliseconds between two ktimes.
@@ -72,12 +157,47 @@ pub fn ktime_ms_delta(later: Ktime, earlier: Ktime) -> i64 {
 }
 
 impl core::ops::Sub for Ktime {
-    type Output = Ktime;
+    type Output = Self;
 
+    /// Substraction on [`Self`].
+    ///
+    /// When overflow, this function performs a wrapping substraction (with an error printed). This
+    /// function should only be used when overflows are unexpected to happen, i.e. overflows are
+    /// caused by hardware or internal bugs. [`Self::checked_sub`], [`Self::overflowing_sub`] or
+    /// [`Self::wrapping_sub`] should be used in other cases.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kernel::time::Ktime;
+    ///
+    /// let ts1 = Ktime::ktime_get();
+    /// let ts2 = Ktime::ktime_get();
+    ///
+    /// // An impossible ktime stamp only to demonstrate overflow behaviors.
+    /// let impossible = Ktime::from_raw(i64::MIN);
+    ///
+    /// // `ktime_get()` is monotonic.
+    /// assert!((ts2 - ts1).to_ns() >= 0);
+    ///
+    /// // `ktime_get()` is always non-negative, and this will trigger an overflow, and the wrapped
+    /// // result is always negative.
+    /// assert!((ts2 - impossible).to_ns() < 0);
+    /// ```
     #[inline]
-    fn sub(self, other: Ktime) -> Ktime {
-        Self {
-            inner: self.inner - other.inner,
+    fn sub(self, other: Self) -> Self {
+        // TODO: Use language generated hook (e.g. https://github.com/rust-lang/rfcs/pull/3632) for
+        // this.
+        let (delta, is_overflow) = self.overflowing_sub(other);
+
+        if is_overflow {
+            crate::pr_err!(
+                "Ktime substraction overflow: {} - {}\n",
+                self.inner,
+                other.inner
+            );
         }
+
+        delta
     }
 }
