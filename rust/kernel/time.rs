@@ -8,6 +8,8 @@
 //! C header: [`include/linux/jiffies.h`](srctree/include/linux/jiffies.h).
 //! C header: [`include/linux/ktime.h`](srctree/include/linux/ktime.h).
 
+use core::marker::PhantomData;
+
 /// The number of nanoseconds per millisecond.
 pub const NSEC_PER_MSEC: i64 = bindings::NSEC_PER_MSEC as i64;
 
@@ -200,4 +202,85 @@ impl core::ops::Sub for Ktime {
 
         delta
     }
+}
+
+/// Represents a clock, that is, a unique time source and it can be queried for the current time.
+pub trait Clock: Sized {
+    /// Returns the current time for this clock.
+    fn now() -> Instant<Self>;
+}
+
+/// Marker trait for clock sources that are guaranteed to be monotonic.
+pub trait MonotonicClock: Clock {}
+
+/// A timestamp reading of a given [`Clock`].
+///
+/// The only way to get a [`Self`] is via the corresponding [`Clock::now`].
+pub struct Instant<T: Clock> {
+    ktime: Ktime,
+    clock: PhantomData<T>,
+}
+
+impl<T: Clock> Clone for Instant<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: Clock> Copy for Instant<T> {}
+
+impl<T: Clock> core::ops::Sub for Instant<T> {
+    type Output = Ktime;
+
+    /// Returns the difference of two reading of timestamps.
+    #[inline]
+    fn sub(self, other: Self) -> Self::Output {
+        self.ktime - other.ktime
+    }
+}
+
+impl<T: MonotonicClock> Instant<T> {
+    /// Returns the time elapsed since this [`Self`] to now.
+    ///
+    /// Always returns non-negative values because [`Self`] can be only created by the corresponding
+    /// [`Clock::now()`], so the [`Self`] that `&self` references must be created before this
+    /// function is called, and given this function only exists for [`MonotonicClock`], `&self` must
+    /// be ealier than now.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kernel::time::{Clock, clock::KernelTime};
+    ///
+    /// let ts = KernelTime::now();
+    ///
+    /// // `KernelTime` is monotonic.
+    /// assert!(ts.elapsed().to_ns() >= 0);
+    /// ```
+    #[inline]
+    pub fn elapsed(&self) -> Ktime {
+        T::now() - *self
+    }
+}
+
+/// Contains the various clock source types available to the kernel.
+pub mod clock {
+    use super::*;
+
+    /// A clock representing the default kernel time source (`CLOCK_MONOTONIC`).
+    pub struct KernelTime;
+
+    impl Clock for KernelTime {
+        #[inline]
+        fn now() -> Instant<Self> {
+            Instant {
+                // SAFETY: It is always safe to call `ktime_get` outside of NMI context.
+                ktime: Ktime::from_raw(unsafe { bindings::ktime_get() }),
+                clock: PhantomData,
+            }
+        }
+    }
+
+    /// `CLOCK_MONOTONIC` is monotonic.
+    impl MonotonicClock for KernelTime {}
 }
