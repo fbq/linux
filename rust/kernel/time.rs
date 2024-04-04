@@ -48,12 +48,6 @@ impl Ktime {
         Self::from_raw(unsafe { bindings::ktime_get() })
     }
 
-    /// Divide the number of nanoseconds by a compile-time constant.
-    #[inline]
-    fn divns_constant<const DIV: i64>(self) -> i64 {
-        self.to_ns() / DIV
-    }
-
     /// Returns the number of nanoseconds.
     #[inline]
     pub fn to_ns(self) -> i64 {
@@ -63,7 +57,7 @@ impl Ktime {
     /// Returns the number of milliseconds.
     #[inline]
     pub fn to_ms(self) -> i64 {
-        self.divns_constant::<NSEC_PER_MSEC>()
+        self.to_ns() / NSEC_PER_MSEC
     }
 
     /// Checked substraction on [`Self`].
@@ -150,12 +144,6 @@ impl Ktime {
             inner: self.inner.wrapping_sub(other.inner),
         }
     }
-}
-
-/// Returns the number of milliseconds between two ktimes.
-#[inline]
-pub fn ktime_ms_delta(later: Ktime, earlier: Ktime) -> i64 {
-    (later - earlier).to_ms()
 }
 
 impl core::ops::Sub for Ktime {
