@@ -48,6 +48,13 @@ impl Ktime {
         Self::from_raw(unsafe { bindings::ktime_get() })
     }
 
+    /// Creates a `Ktime` from the specified number of nanoseconds.
+    #[inline]
+    pub const fn from_ns(ns: i64) -> Self {
+        // `ktime_t` is an `i64` of nanoseconds.
+        Self { inner: ns }
+    }
+
     /// Returns the number of nanoseconds.
     #[inline]
     pub fn to_ns(self) -> i64 {
@@ -192,6 +199,54 @@ impl core::ops::Sub for Ktime {
     }
 }
 
+/// A span of time, usually used for timeouts (deltas from earlier timestamps to later timestamps).
+///
+/// # Invariants
+///
+/// The range of a [`Self`] value is [0, KTIME_MAX] in nanoseconds. `KTIME_MAX` is `i64::MAX`.
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct Duration {
+    ktime: Ktime,
+}
+
+impl Duration {
+    /// Creates a [`Self`] from the specified nanoseconds.
+    ///
+    /// Returns `None` if `ns` negative.
+    #[inline]
+    pub const fn from_ns(ns: i64) -> Option<Self> {
+        if ns < 0 {
+            None
+        } else {
+            // INVARIANT: the `Duration` is guaranteed to be non-negative.
+            Some(Self {
+                ktime: Ktime::from_ns(ns),
+            })
+        }
+    }
+
+    /// Creates a [`Self`] from the specified nanoseconds without checking whether the value is
+    /// non-negative.
+    ///
+    /// # Safety
+    ///
+    /// Callers must guarante `ns` >= 0.
+    #[inline]
+    pub const unsafe fn from_ns_unchecked(ns: i64) -> Self {
+        // INVARIANT: the function's safety requirement guarantees `ns` >= 0.
+        Self {
+            ktime: Ktime::from_ns(ns),
+        }
+    }
+
+    /// Returns the number of nanoseconds, which is always non-negative per type invariants.
+    #[inline]
+    pub fn as_ns(&self) -> i64 {
+        self.ktime.to_ms()
+    }
+}
+
 /// Represents a clock, that is, a unique time source and it can be queried for the current time.
 pub trait Clock: Sized {
     /// Returns the current time for this clock.
@@ -243,11 +298,13 @@ impl<T: MonotonicClock> Instant<T> {
     /// let ts = KernelTime::now();
     ///
     /// // `KernelTime` is monotonic.
-    /// assert!(ts.elapsed().to_ns() >= 0);
+    /// assert!(ts.elapsed().as_ns() >= 0);
     /// ```
     #[inline]
-    pub fn elapsed(&self) -> Ktime {
-        T::now() - *self
+    pub fn elapsed(&self) -> Duration {
+        // SAFETY: since `self` is created by a previous call of `T::now()` then it must be an
+        // ealier time than the current call of `T::now()`, thus the delta must be non-negative.
+        unsafe { Duration::from_ns_unchecked((T::now() - *self).to_ns()) }
     }
 }
 
