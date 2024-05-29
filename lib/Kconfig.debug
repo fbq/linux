@@ -3049,6 +3049,19 @@ config RUST_KERNEL_DOCTESTS
 
 	  If unsure, say N.
 
+config RUST_LTO_HELPERS
+    bool "LTO C helpers with Rust crates"
+    depends on RUST && CC_IS_CLANG && EXPERT
+    help
+      Links C helpers together with Rust crates using LTO.
+
+      This is achieved by compiling both helpers and Rust crates into
+      LLVM bitcode and use llvm-link to combine them.
+
+      This requires a matching LLVM version for Clang and rustc.
+
+      If unsure, say N.
+
 endmenu # "Rust"
 
 endmenu # Kernel hacking
