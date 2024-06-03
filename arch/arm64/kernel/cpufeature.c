@@ -1601,6 +1601,8 @@ static bool
 has_cpuid_feature(const struct arm64_cpu_capabilities *entry, int scope)
 {
 	u64 val = read_scoped_sysreg(entry, scope);
+	if (entry->capability == ARM64_HAS_LSE_ATOMICS)
+		return false;
 	return feature_matches(val, entry);
 }
 
