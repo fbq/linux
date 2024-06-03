@@ -34,6 +34,8 @@
 #include <linux/workqueue.h>
 #include "helpers.h"
 
+#include "atomic_helpers.h"
+
 __rust_helper __noreturn void rust_helper_BUG(void)
 {
 	BUG();
