@@ -2710,6 +2710,25 @@ static void local_lock_3B(void)
 
 }
 
+ /** 
+  * after setting the subclass the lockdep_map.name changes
+  * if we initialize a new string literal for the subclass
+  * we will have a new name pointer
+  */
+static void class_subclass_X1_name_test(void)
+{
+	printk("  --------------------------------------------------------------------------\n");
+	printk("  | class and subclass name test|\n");
+	printk("  ---------------------\n");
+	const char *name_before_setting_subclass = rwsem_X1.dep_map.name;
+	const char *name_after_setting_subclass;
+
+	WARN_ON(!rwsem_X1.dep_map.name);
+	lockdep_set_subclass(&rwsem_X1, 1);
+	name_after_setting_subclass = rwsem_X1.dep_map.name;
+	WARN_ON(name_before_setting_subclass != name_after_setting_subclass);
+}
+
 static void local_lock_tests(void)
 {
 	printk("  --------------------------------------------------------------------------\n");
@@ -2915,6 +2934,8 @@ void locking_selftest(void)
 		wait_context_tests();
 
 	local_lock_tests();
+
+	class_subclass_X1_name_test();
 
 	print_testname("hardirq_unsafe_softirq_safe");
 	dotest(hardirq_deadlock_softirq_not_deadlock, FAILURE, LOCKTYPE_SPECIAL);
