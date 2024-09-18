@@ -61,3 +61,49 @@ impl generic::AllowAtomicArithmetic for u64 {
         d as _
     }
 }
+
+/// ```rust
+/// use kernel::sync::atomic::generic::*;
+/// use kernel::sync::atomic::ordering::*;
+///
+/// let x = Atomic::new(42usize);
+///
+/// assert_eq!(42, x.read(Relaxed));
+/// ```
+// SAFETY: `usize` has the same size and the alignment as `i64` for 64bit and the same as `i32` for
+// 32bit.
+unsafe impl generic::AllowAtomic for usize {
+    #[cfg(CONFIG_64BIT)]
+    type Repr = i64;
+    #[cfg(not(CONFIG_64BIT))]
+    type Repr = i32;
+
+    fn into_repr(self) -> Self::Repr {
+        self as _
+    }
+
+    fn from_repr(repr: Self::Repr) -> Self {
+        repr as _
+    }
+}
+
+/// ```rust
+/// use kernel::sync::atomic::generic::*;
+/// use kernel::sync::atomic::ordering::*;
+///
+/// let x = Atomic::new(42usize);
+///
+/// assert_eq!(42, x.fetch_add(12, Full));
+/// assert_eq!(54, x.read(Relaxed));
+///
+/// x.add(13, Relaxed);
+///
+/// assert_eq!(67, x.read(Relaxed));
+/// ```
+impl generic::AllowAtomicArithmetic for usize {
+    type Delta = usize;
+
+    fn delta_into_repr(d: Self::Delta) -> Self::Repr {
+        d as _
+    }
+}
