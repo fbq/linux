@@ -318,3 +318,174 @@ where
         T::from_repr(ret)
     }
 }
+
+impl<T: AllowAtomic> Atomic<T>
+where
+    T::Repr: AtomicHasXchgOps,
+{
+    /// Atomic exchange.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kernel::sync::atomic::generic::*;
+    /// use kernel::sync::atomic::ordering::*;
+    ///
+    /// let x = Atomic::new(42i32);
+    ///
+    /// assert_eq!(42, x.xchg(52, Acquire));
+    /// assert_eq!(52, x.read(Relaxed));
+    /// ```
+    #[inline(always)]
+    pub fn xchg<Ordering: All>(&self, v: T, _: Ordering) -> T {
+        let v = T::into_repr(v);
+        let a = self.as_ptr().cast::<T::Repr>();
+
+        // SAFETY:
+        // - For calling the atomic_xchg*() function:
+        //   - `self.as_ptr()` is a valid pointer, and per the safety requirement of `AllocAtomic`,
+        //      a `*mut T` is a valid `*mut T::Repr`. Therefore `a` is a valid pointer,
+        //   - per the type invariants, the following atomic operation won't cause data races.
+        // - For extra safety requirement of usage on pointers returned by `self.as_ptr():
+        //   - atomic operations are used here.
+        let ret = unsafe {
+            match Ordering::ORDER {
+                ordering::OrderingDesc::Full => T::Repr::atomic_xchg(a, v),
+                ordering::OrderingDesc::Acquire => T::Repr::atomic_xchg_acquire(a, v),
+                ordering::OrderingDesc::Release => T::Repr::atomic_xchg_release(a, v),
+                ordering::OrderingDesc::Relaxed => T::Repr::atomic_xchg_relaxed(a, v),
+            }
+        };
+
+        T::from_repr(ret)
+    }
+
+    /// Atomic compare and exchange.
+    ///
+    /// Compare: The comparison is done via the byte level comparison between the atomic variables
+    /// with the `old` value.
+    ///
+    /// Ordering: A failed compare and exchange does provide anything, the read part of a failed
+    /// cmpxchg should be treated as a relaxed read.
+    ///
+    /// Returns the value of the atomic variable at the atomic comparison time, if return value !=
+    /// `old`, the cmpxchg fails, otherwise it succeeds. I.e. no spurious failure.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kernel::sync::atomic::generic::*;
+    /// use kernel::sync::atomic::ordering::*;
+    ///
+    /// let x = Atomic::new(42i32);
+    ///
+    /// assert_eq!(42, x.cmpxchg(52, 64, Acquire));
+    /// assert_eq!(42, x.read(Relaxed));
+    /// assert_eq!(42, x.cmpxchg(42, 64, Acquire));
+    /// assert_eq!(64, x.read(Relaxed));
+    /// ```
+    #[inline(always)]
+    pub fn cmpxchg<Ordering: All>(&self, old: T, new: T, _: Ordering) -> T {
+        let old = T::into_repr(old);
+        let new = T::into_repr(new);
+        let a = self.0.get().cast::<T::Repr>();
+
+        // SAFETY:
+        // - For calling the atomic_cmpchg*() function:
+        //   - `self.as_ptr()` is a valid pointer, and per the safety requirement of `AllocAtomic`,
+        //      a `*mut T` is a valid `*mut T::Repr`. Therefore `a` is a valid pointer,
+        //   - per the type invariants, the following atomic operation won't cause data races.
+        // - For extra safety requirement of usage on pointers returned by `self.as_ptr():
+        //   - atomic operations are used here.
+        let ret = unsafe {
+            match Ordering::ORDER {
+                ordering::OrderingDesc::Full => T::Repr::atomic_cmpxchg(a, old, new),
+                ordering::OrderingDesc::Acquire => T::Repr::atomic_cmpxchg_acquire(a, old, new),
+                ordering::OrderingDesc::Release => T::Repr::atomic_cmpxchg_release(a, old, new),
+                ordering::OrderingDesc::Relaxed => T::Repr::atomic_cmpxchg_relaxed(a, old, new),
+            }
+        };
+
+        T::from_repr(ret)
+    }
+
+    /// Atomic compare and exchange and returns whether the operation succeeds.
+    ///
+    /// "Compare" and "Ordering" part are the same as [`Atomic::cmpxchg`].
+    ///
+    /// Returns `true` means the cmpxchg succeeds otherwise returns `false` with `old` updated to
+    /// the value of the atomic variable when cmpxchg was happening.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kernel::sync::atomic::generic::*;
+    /// use kernel::sync::atomic::ordering::*;
+    ///
+    /// let x = Atomic::new(42i32);
+    /// let mut v = 52;
+    ///
+    /// assert!(!x.try_cmpxchg(&mut v, 64, Acquire));
+    /// assert_eq!(42, x.read(Relaxed));
+    /// assert_eq!(42, v);
+    ///
+    /// v = 42;
+    ///
+    /// assert!(x.try_cmpxchg(&mut v, 64, Acquire));
+    /// assert_eq!(64, x.read(Relaxed));
+    /// ```
+    #[inline(always)]
+    pub fn try_cmpxchg<Ordering: All>(&self, old: &mut T, new: T, _: Ordering) -> bool {
+        let old = (old as *mut T).cast::<T::Repr>();
+        let new = T::into_repr(new);
+        let a = self.0.get().cast::<T::Repr>();
+
+        // SAFETY:
+        // - For calling the atomic_try_cmpchg*() function:
+        //   - `self.as_ptr()` is a valid pointer, and per the safety requirement of `AllocAtomic`,
+        //      a `*mut T` is a valid `*mut T::Repr`. Therefore `a` is a valid pointer,
+        //   - per the type invariants, the following atomic operation won't cause data races.
+        //   - `old` is a valid pointer to write because it comes from a mutable reference.
+        // - For extra safety requirement of usage on pointers returned by `self.as_ptr():
+        //   - atomic operations are used here.
+        unsafe {
+            match Ordering::ORDER {
+                ordering::OrderingDesc::Full => T::Repr::atomic_try_cmpxchg(a, old, new),
+                ordering::OrderingDesc::Acquire => T::Repr::atomic_try_cmpxchg_acquire(a, old, new),
+                ordering::OrderingDesc::Release => T::Repr::atomic_try_cmpxchg_release(a, old, new),
+                ordering::OrderingDesc::Relaxed => T::Repr::atomic_try_cmpxchg_relaxed(a, old, new),
+            }
+        }
+    }
+
+    /// Atomic compare and exchange and return a [`Result`].
+    ///
+    /// "Compare" and "Ordering" part are the same as [`Atomic::cmpxchg`].
+    ///
+    /// Returns `Ok(value)` if cmpxchg succeeds, and `value` is guaranteed to be equal to `old`,
+    /// otherwise returns `Err(value)`, and `value` is the value of the atomic variable when cmpxchg
+    /// was happening.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kernel::sync::atomic::generic::*;
+    /// use kernel::sync::atomic::ordering::*;
+    ///
+    /// let x = Atomic::new(42i32);
+    ///
+    /// assert!(x.compare_exchange(52, 64, Acquire).is_err());
+    /// assert_eq!(42, x.read(Relaxed));
+    ///
+    /// assert!(x.compare_exchange(42, 64, Acquire).is_ok());
+    /// assert_eq!(64, x.read(Relaxed));
+    /// ```
+    #[inline(always)]
+    pub fn compare_exchange<Ordering: All>(&self, mut old: T, new: T, o: Ordering) -> Result<T, T> {
+        if self.try_cmpxchg(&mut old, new, o) {
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+}
