@@ -2,26 +2,45 @@
 //! This module contains abstractions for creating and using per-CPU variables from Rust. In
 //! particular, see the define_per_cpu! and unsafe_get_per_cpu_ref! macros.
 pub mod cpu_guard;
+// pub mod ref_count;
+
+use bindings::{alloc_percpu, free_percpu};
 
 use crate::percpu::cpu_guard::CpuGuard;
+use crate::prelude::*;
+use crate::sync::Arc;
 use crate::unsafe_get_per_cpu_ref;
 
 use core::arch::asm;
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 
+use ffi::c_void;
+
+/// Holds a dynamically allocated per-CPU variable.
+pub struct PerCpu<T> {
+    alloc: Arc<PerCpuAllocation<T>>,
+}
+
+/// Represents an allocation of a per-CPU variable via alloc_percpu. Calls free_percpu when
+/// dropped.
+struct PerCpuAllocation<T> {
+    pub offset: usize,
+    pub deref_type: PhantomData<T>,
+}
+
 /// A PerCpuRef is obtained by the unsafe_get_per_cpu_ref! macro used on a StaticPerCpuSymbol
 /// defined via the define_per_cpu! macro.
 ///
 /// This type will transparently deref(mut) into a &(mut) T referencing this CPU's instance of the
 /// underlying variable.
-pub struct PerCpuRef<T> {
+pub struct PerCpuRef<'a, T> {
     offset: usize,
-    deref_type: PhantomData<T>,
+    deref_type: PhantomData<&'a T>,
     _guard: CpuGuard,
 }
 
-/// A wrapper used for declaring static per-cpu variables. These symbols are "virtual" in that the
+/// A wrapper used for declaring static per-CPU variables. These symbols are "virtual" in that the
 /// linker uses them to generate offsets into each cpu's per-cpu area, but shouldn't be read
 /// from/written to directly. The fact that the statics are immutable prevents them being written
 /// to (generally), this struct having _val be non-public prevents reading from them.
@@ -33,12 +52,71 @@ pub struct StaticPerCpuSymbol<T> {
     _val: T, // generate a correctly sized type
 }
 
-impl<T> PerCpuRef<T> {
-    /// You should be using the unsafe_get_per_cpu! macro instead
+impl<T> PerCpu<T> {
+    /// Allocate a new per-CPU variable
+    pub fn new() -> Option<Self> {
+        // TODO is this right? (e.g., do we need to see if the alloc should be atomic?)
+        // SAFETY: No preconditions to call alloc_percpu
+        let ptr: *mut c_void = unsafe { alloc_percpu(size_of::<T>(), align_of::<T>()) };
+        if ptr.is_null() {
+            return None;
+        }
+
+        // TODO maybe not GFP_KERNEL?
+        let alloc = Arc::new(
+            PerCpuAllocation {
+                offset: ptr as usize,
+                deref_type: PhantomData,
+            },
+            GFP_KERNEL,
+        );
+        if alloc.is_err() {
+            return None;
+        }
+
+        Some(Self {
+            alloc: alloc.unwrap(),
+        })
+    }
+
+    /// Gets a PerCpuRef referring to the underlying per-CPU variable.
+    pub fn get<'a>(&'a mut self, guard: CpuGuard) -> PerCpuRef<'a, T> {
+        // SAFETY: self.offset was returned by alloc_percpu, and so was a valid pointer into the
+        // percpu area, and has remained valid by the invariants of PerCpu<T>.
+        unsafe { PerCpuRef::new::<'a>(self.alloc.offset, guard) }
+    }
+
+    /// Creates a new PerCpu<T> pointing to the same underlying variable
+    ///
+    /// # Safety
+    /// The returned PerCpu<T> must be immediately moved to another thread without its `get`
+    /// method being called on the current thread. No thread may have more than one PerCpu<T>
+    /// pointing at the same underlying per-CPU variable.
+    pub unsafe fn clone(&self) -> Self {
+        Self {
+            alloc: self.alloc.clone(),
+        }
+    }
+}
+
+impl<T> Drop for PerCpuAllocation<T> {
+    fn drop(&mut self) {
+        // SAFETY: self.offset was returned by alloc_percpu, and so was a valid pointer into the
+        // percpu area, and has remained valid by the invariants of PerCpu<T>.
+        unsafe { free_percpu(self.offset as *mut c_void) }
+    }
+}
+
+impl<'a, T> PerCpuRef<'a, T> {
+    /// You should be using the unsafe_get_per_cpu! macro (if accessing a static percpu) or
+    /// PerCpu::get (if accessing a dynamic percpu) instead
+    ///
+    /// 'b is the lifetime of the returned PerCpuRef, and should correspond to the lifetime of the
+    /// borrowed PerCpu<T> (if dynamically allocated) or 'static (if statically allocated).
     ///
     /// # Safety
     /// offset must be a valid offset into the per cpu area
-    pub unsafe fn new(offset: usize, guard: CpuGuard) -> Self {
+    pub unsafe fn new<'b>(offset: usize, guard: CpuGuard) -> PerCpuRef<'b, T> {
         PerCpuRef {
             offset,
             deref_type: PhantomData,
@@ -49,8 +127,9 @@ impl<T> PerCpuRef<T> {
     /// Computes this_cpu_ptr as a usize, ignoring issues of ownership and borrowing
     fn this_cpu_ptr_usize(&self) -> usize {
         // SAFETY: this_cpu_off is read only as soon as the per-CPU subsystem is initialized
-        let off: PerCpuRef<u64> = unsafe { unsafe_get_per_cpu_ref!(this_cpu_off, CpuGuard::new()) };
-        let mut this_cpu_area: *mut T;
+        let off: PerCpuRef<'static, u64> =
+            unsafe { unsafe_get_per_cpu_ref!(this_cpu_off, CpuGuard::new()) };
+        let mut this_cpu_area: *mut c_void;
         // SAFETY: gs + off_val is guaranteed to be a valid pointer by the per-CPU subsystem and
         // the invariants guaranteed by PerCpuRef (i.e., off.offset is valid)
         unsafe {
@@ -63,6 +142,8 @@ impl<T> PerCpuRef<T> {
                 out = out(reg) this_cpu_area,
             )
         };
+        // SAFETY: this_cpu_area + self.offset is guaranteed to be a valid pointer by the per-CPU
+        // subsystem and the invariant that self.offset is a valid offset into the per-CPU area.
         unsafe { (this_cpu_area.add(self.offset)) as usize }
     }
 
@@ -79,9 +160,9 @@ impl<T> PerCpuRef<T> {
     }
 }
 
-impl<T> Deref for PerCpuRef<T> {
+impl<'a, T> Deref for PerCpuRef<'a, T> {
     type Target = T;
-    fn deref(&self) -> &Self::Target {
+    fn deref(&self) -> &'a Self::Target {
         // SAFETY: By the contract of unsafe_get_per_cpu_ref!, we know that self is the only
         // PerCpuRef associated with the underlying per-CPU variable and that the underlying
         // variable is not mutated outside of rust.
@@ -89,8 +170,8 @@ impl<T> Deref for PerCpuRef<T> {
     }
 }
 
-impl<T> DerefMut for PerCpuRef<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+impl<'a, T> DerefMut for PerCpuRef<'a, T> {
+    fn deref_mut(&mut self) -> &'a mut Self::Target {
         // SAFETY: By the contract of unsafe_get_per_cpu_ref!, we know that self is the only
         // PerCpuRef associated with the underlying per-CPU variable and that the underlying
         // variable is not mutated outside of rust.
@@ -114,12 +195,12 @@ macro_rules! define_per_cpu {
         $crate::macros::paste! {
             // Expand $expr outside of the unsafe block to avoid silently allowing unsafe code to be
             // used without a user-facing unsafe block
-            static [<__init_ $id>]: $ty = $expr;
+            static [<__INIT_ $id>]: $ty = $expr;
 
             // SAFETY: StaticPerCpuSymbol<T> is #[repr(transparent)], so we can freely convert from T
             #[link_section = ".data..percpu"]
             $vis static $id: StaticPerCpuSymbol<$ty> = unsafe {
-                core::mem::transmute::<$ty, StaticPerCpuSymbol<$ty>>([<__init_ $id>])
+                core::mem::transmute::<$ty, StaticPerCpuSymbol<$ty>>([<__INIT_ $id>])
             };
         }
     };
@@ -143,7 +224,7 @@ macro_rules! define_per_cpu {
 macro_rules! unsafe_get_per_cpu_ref {
     ($id:ident, $guard:expr) => {{
         let off = core::ptr::addr_of!($id);
-        PerCpuRef::new(off as usize, $guard)
+        PerCpuRef::new::<'static>(off as usize, $guard)
     }};
 }
 

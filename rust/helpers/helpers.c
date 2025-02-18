@@ -22,6 +22,7 @@
 #include "page.c"
 #include "platform.c"
 #include "pci.c"
+#include "percpu.c"
 #include "pid_namespace.c"
 #include "preempt.c"
 #include "rbtree.c"
