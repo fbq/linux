@@ -99,6 +99,57 @@ impl<T> PerCpu<T> {
     }
 }
 
+/// TODO
+pub trait PerCpuCallback<T: Sized> {
+    /// # Safety
+    ///
+    /// TODO
+    unsafe extern "C" fn percpu_fn(ptr: *mut c_void) {
+        let pcpu = unsafe { (&*(ptr as *const PerCpu<T>)).clone() };
+        Self::callback(pcpu);
+    }
+
+    /// TODO
+    fn callback(pcpu: PerCpu<T>);
+}
+
+/// TODO
+///
+/// # Examples
+///
+/// ```
+/// use kernel::prelude::*;
+/// use kernel::percpu::{cpu_guard::CpuGuard, PerCpu, PerCpuCallback, on_each_cpu};
+///
+/// struct IncPerCpu;
+///
+/// impl PerCpuCallback<i32> for IncPerCpu {
+///     fn callback(mut pcpu: PerCpu<i32>) {
+///         unsafe {
+///             *pcpu.get(CpuGuard::new()) += 1;
+///         }
+///     }
+/// }
+/// let mut test = PerCpu::new().ok_or(ENOMEM)?;
+///
+/// // let my_ref = unsafe { test.get(CpuGuard::new()) };
+/// // build error if uncomment above and comment below.
+///
+/// on_each_cpu::<_, IncPerCpu>(&test);
+///
+/// let my_ref = unsafe { test.get(CpuGuard::new()) };
+///
+/// // each CPU has been increased by 1;
+/// assert_eq!(*my_ref, 1);
+/// # Ok::<(), Error>(())
+/// ```
+pub fn on_each_cpu<T, C: PerCpuCallback<T>>(pcpu: &PerCpu<T>) {
+    // TODO
+    unsafe {
+        bindings::on_each_cpu(Some(C::percpu_fn), pcpu as *const _ as *mut c_void, 1);
+    }
+}
+
 impl<T> Drop for PerCpuAllocation<T> {
     fn drop(&mut self) {
         // SAFETY: self.offset was returned by alloc_percpu, and so was a valid pointer into the
