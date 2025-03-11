@@ -59,6 +59,10 @@ pub fn read_lock() -> Guard {
 /// variable exclusively owns the pointer.
 pub struct Rcu<P: ForeignOwnable>(Atomic<*mut crate::ffi::c_void>, PhantomData<P>);
 
+// SAFETY: `Rcu` is safe to have multiple immutable references co-existing with one pinned mutable
+// reference.
+unsafe impl<P: ForeignOwnable> crate::sync::Projectable for Rcu<P> {}
+
 /// A pointer that has been unpublished, but hasn't waited for a grace period yet.
 ///
 /// The pointed object may still have an existing RCU reader. Therefore a grace period is needed to
