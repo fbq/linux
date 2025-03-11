@@ -176,6 +176,71 @@ impl<T: ?Sized, B: GlobalLockBackend> GlobalLockedBy<T, B> {
     }
 }
 
+use crate::kernel::sync::Projectable;
+
+/// A version of [`LockedBy`] for a [`GlobalLock`], where the content is projectable.
+///
+/// See [`global_lock!`] for examples.
+pub struct ProjectableGlobalLockedBy<T: ?Sized + Projectable, B: GlobalLockBackend> {
+    _backend: PhantomData<B>,
+    value: UnsafeCell<T>,
+}
+
+// SAFETY: The same thread-safety rules as `LockedBy` apply to `GlobalLockedBy`.
+unsafe impl<T, B> Send for ProjectableGlobalLockedBy<T, B>
+where
+    T: ?Sized + Projectable,
+    B: GlobalLockBackend,
+    LockedBy<T, B::Item>: Send,
+{
+}
+
+// SAFETY: The same thread-safety rules as `LockedBy` apply to `GlobalLockedBy`.
+unsafe impl<T, B> Sync for ProjectableGlobalLockedBy<T, B>
+where
+    T: ?Sized + Projectable,
+    B: GlobalLockBackend,
+    LockedBy<T, B::Item>: Sync,
+{
+}
+
+impl<T: Projectable, B: GlobalLockBackend> ProjectableGlobalLockedBy<T, B> {
+    /// Create a new [`GlobalLockedBy`].
+    ///
+    /// The provided value will be protected by the global lock indicated by `B`.
+    pub const fn new(val: T) -> Self {
+        Self {
+            value: UnsafeCell::new(val),
+            _backend: PhantomData,
+        }
+    }
+}
+
+impl<T: ?Sized + Projectable, B: GlobalLockBackend> core::ops::Deref
+    for ProjectableGlobalLockedBy<T, B>
+{
+    type Target = T;
+    /// Access the value immutably.
+    ///
+    /// The caller must prove shared access to the lock.
+    fn deref<'a>(&'a self) -> &'a T {
+        // SAFETY: Per safety requirement of `Projectable` it's safe to return an immutable reference to the
+        // value.
+        unsafe { &*self.value.get() }
+    }
+}
+
+impl<T: ?Sized + Projectable, B: GlobalLockBackend> ProjectableGlobalLockedBy<T, B> {
+    /// Access the value mutably.
+    ///
+    /// The caller must prove shared exclusive to the lock.
+    pub fn as_mut<'a>(&'a self, _guard: &'a mut GlobalGuard<B>) -> Pin<&'a mut T> {
+        // SAFETY: Per safety requirement of `Projectable` it's safe to return a Pin<&mut>, and the lock
+        // guard guarantees only one Pin<&mut> exists at a time.
+        unsafe { Pin::new_unchecked(&mut *self.value.get()) }
+    }
+}
+
 /// Defines a global lock.
 ///
 /// The global mutex must be initialized before first use. Usually this is done by calling
