@@ -114,3 +114,11 @@ macro_rules! optional_name {
         $crate::c_str!($name)
     };
 }
+
+/// A trait that allows multiple [`&Self`] and one [`Pin<&mut Self>`] exists at the same time.
+///
+/// # Safety
+///
+/// The implement type must allow multiple immutable references and one pinned mutable references
+/// co-exist as the same time.
+pub unsafe trait Projectable {}
