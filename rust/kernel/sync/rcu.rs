@@ -228,6 +228,65 @@ impl<P: ForeignOwnable> Rcu<P> {
     /// [`Opaque<T>`] which has the same effect on aliasing rules as [`UnsafePinned`].
     ///
     /// [`UnsafePinned`]: https://rust-lang.github.io/rfcs/3467-unsafe-pinned.html
+    ///
+    /// ```
+    /// use kernel::prelude::*;
+    ///
+    /// use kernel::sync::{GlobalGuard, ProjectableGlobalLockedBy, rcu::{Rcu, read_lock}};
+    /// use kernel::{alloc::{KBox, KVec}, error::Error};
+    /// use core::ops::Deref;
+    ///
+    /// kernel::sync::global_lock! {
+    ///     // SAFETY: Initialized in module initializer before first use.
+    ///     pub unsafe(uninit) static MY_MUTEX: Mutex<()> = ();
+    /// }
+    ///
+    /// static POLICY: ProjectableGlobalLockedBy<Rcu<KBox<KVec<u32>>>, MY_MUTEX> = ProjectableGlobalLockedBy::new(Rcu::null());
+    ///
+    /// // SAFETY: initialize one time.
+    /// unsafe { MY_MUTEX.init() };
+    ///
+    ///
+    /// // Two readers
+    /// let r1 = POLICY.deref();
+    /// let r2 = POLICY.deref();
+    ///
+    /// let mut g = MY_MUTEX.lock();
+    ///
+    /// let mut w = POLICY.as_mut(&mut g);
+    ///
+    /// w.as_mut().read_copy_update(|_| {
+    ///     let mut vec = kernel::kvec![];
+    ///
+    ///     vec.push(1, GFP_KERNEL).ok()?;
+    ///
+    ///     KBox::new(vec, GFP_KERNEL).ok()
+    /// });
+    ///
+    /// let rcu_guard = read_lock();
+    /// let v = r1.dereference(&rcu_guard);
+    ///
+    /// assert_eq!(v, Some(&(kernel::kvec![1]?)));
+    ///
+    /// drop(rcu_guard);
+    ///
+    /// w.read_copy_update(|old| {
+    ///     let mut vec = kernel::kvec![];
+    ///
+    ///     vec.extend_from_slice(old?.as_slice(), GFP_KERNEL).ok()?;
+    ///     vec.push(2, GFP_KERNEL).ok()?;
+    ///
+    ///     KBox::new(vec, GFP_KERNEL).ok()
+    /// });
+    ///
+    /// let rcu_guard = read_lock();
+    /// let v = r2.dereference(&rcu_guard);
+    ///
+    /// assert_eq!(v, Some(&(kernel::kvec![1, 2]?)));
+    ///
+    /// drop(rcu_guard);
+    /// # Ok::<(), Error>(())
+    /// ```
     pub fn read_copy_update<F>(self: Pin<&mut Self>, f: F) -> Option<RcuOld<P>>
     where
         F: FnOnce(Option<P::Borrowed<'_>>) -> Option<P>,
