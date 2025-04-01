@@ -893,9 +893,9 @@ void vmbus_reset_channel_cb(struct vmbus_channel *channel)
 	tasklet_disable(&channel->callback_event);
 
 	/* See the inline comments in vmbus_chan_sched(). */
-	spin_lock_irqsave(&channel->sched_lock, flags);
+	raw_spin_lock_irqsave(&channel->sched_lock, flags);
 	channel->onchannel_callback = NULL;
-	spin_unlock_irqrestore(&channel->sched_lock, flags);
+	raw_spin_unlock_irqrestore(&channel->sched_lock, flags);
 
 	channel->sc_creation_callback = NULL;
 

@@ -1247,7 +1247,7 @@ static void vmbus_chan_sched(struct hv_per_cpu_context *hv_cpu)
 		 * sched_lock critical section.  See also the inline comments
 		 * in vmbus_reset_channel_cb().
 		 */
-		spin_lock(&channel->sched_lock);
+		raw_spin_lock(&channel->sched_lock);
 
 		callback_fn = channel->onchannel_callback;
 		if (unlikely(callback_fn == NULL))
@@ -1270,7 +1270,7 @@ static void vmbus_chan_sched(struct hv_per_cpu_context *hv_cpu)
 		}
 
 sched_unlock:
-		spin_unlock(&channel->sched_lock);
+		raw_spin_unlock(&channel->sched_lock);
 sched_unlock_rcu:
 		rcu_read_unlock();
 	}

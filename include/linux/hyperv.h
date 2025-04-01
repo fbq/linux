@@ -831,7 +831,7 @@ struct vmbus_channel {
 	 * Synchronize channel scheduling and channel removal; see the inline
 	 * comments in vmbus_chan_sched() and vmbus_reset_channel_cb().
 	 */
-	spinlock_t sched_lock;
+	raw_spinlock_t sched_lock;
 
 	/*
 	 * A channel can be marked for one of three modes of reading:

@@ -1988,13 +1988,13 @@ static void hv_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 		 * sched_lock critical section.  See also the inline comments
 		 * in vmbus_reset_channel_cb().
 		 */
-		spin_lock_irqsave(&channel->sched_lock, flags);
+		raw_spin_lock_irqsave(&channel->sched_lock, flags);
 		if (unlikely(channel->onchannel_callback == NULL)) {
-			spin_unlock_irqrestore(&channel->sched_lock, flags);
+			raw_spin_unlock_irqrestore(&channel->sched_lock, flags);
 			goto enable_tasklet;
 		}
 		hv_pci_onchannelcallback(hbus);
-		spin_unlock_irqrestore(&channel->sched_lock, flags);
+		raw_spin_unlock_irqrestore(&channel->sched_lock, flags);
 
 		udelay(100);
 	}
