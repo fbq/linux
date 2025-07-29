@@ -314,44 +314,6 @@ static inline void do_raw_spin_unlock(raw_spinlock_t *lock) __releases(lock)
 #include <linux/rwlock.h>
 #endif
 
-DECLARE_PER_CPU(struct interrupt_disable_state, local_interrupt_disable_state);
-
-static inline void local_interrupt_disable(void)
-{
-	unsigned long flags;
-	int new_count;
-
-	new_count = hardirq_disable_enter();
-
-	if ((new_count & HARDIRQ_DISABLE_MASK) == HARDIRQ_DISABLE_OFFSET) {
-		local_irq_save(flags);
-		raw_cpu_write(local_interrupt_disable_state.flags, flags);
-	}
-}
-
-static inline void local_interrupt_enable(void)
-{
-	int new_count;
-
-	new_count = hardirq_disable_exit();
-
-	if ((new_count & HARDIRQ_DISABLE_MASK) == 0) {
-		unsigned long flags;
-
-		flags = raw_cpu_read(local_interrupt_disable_state.flags);
-		local_irq_restore(flags);
-		/*
-		 * TODO: re-read preempt count can be avoided, but it needs
-		 * should_resched() taking another parameter as the current
-		 * preempt count
-		 */
-#ifdef PREEMPTION
-		if (should_resched(0))
-			__preempt_schedule();
-#endif
-	}
-}
-
 /*
  * Pull the _spin_*()/_read_*()/_write_*() functions/declarations:
  */
