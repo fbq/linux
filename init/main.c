@@ -907,6 +907,7 @@ void start_kernel(void)
 
 	cgroup_init_early();
 
+	pr_notice("hello, before irq disabled\n");
 	local_irq_disable();
 	early_boot_irqs_disabled = true;
 

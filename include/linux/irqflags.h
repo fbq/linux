@@ -198,6 +198,7 @@ extern void warn_bogus_irq_restore(void);
  */
 #ifdef CONFIG_TRACE_IRQFLAGS
 
+/*
 #define local_irq_enable()				\
 	do {						\
 		trace_hardirqs_on();			\
@@ -211,6 +212,7 @@ extern void warn_bogus_irq_restore(void);
 		if (!was_disabled)			\
 			trace_hardirqs_off();		\
 	} while (0)
+*/
 
 #define local_irq_save(flags)				\
 	do {						\
@@ -301,7 +303,23 @@ static inline void local_interrupt_enable(void)
 	}
 }
 
-DEFINE_LOCK_GUARD_0(irq, local_irq_disable(), local_irq_enable())
+#include <linux/panic.h>
+
+/*
+static inline void local_irq_disable(void)
+{
+	if (irqs_disabled())
+		panic("IRQ is already disabled\n");
+	local_interrupt_disable();
+}
+
+static inline void local_irq_enable(void)
+{
+	local_interrupt_enable();
+}
+*/
+
+DEFINE_LOCK_GUARD_0(irq, local_interrupt_disable(), local_interrupt_enable())
 DEFINE_LOCK_GUARD_0(irqsave,
 		    local_irq_save(_T->flags),
 		    local_irq_restore(_T->flags),
